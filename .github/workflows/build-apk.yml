@@ -30,6 +30,15 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
+      - name: Ensure gradle.properties exists
+        run: |
+          if [ ! -f gradle.properties ]; then
+            echo "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8" >> gradle.properties
+            echo "android.useAndroidX=true" >> gradle.properties
+            echo "android.nonTransitiveRClass=true" >> gradle.properties
+            echo "android.disableMinCompileSdkCheck=true" >> gradle.properties
+          fi
+
       - name: Build Debug APK
         run: gradle assembleDebug -Pandroid.disableMinCompileSdkCheck=true --stacktrace
 

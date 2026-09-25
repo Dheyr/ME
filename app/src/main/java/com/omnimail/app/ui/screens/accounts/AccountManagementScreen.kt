@@ -803,7 +803,7 @@ fun AddSingleAccountDialog(
 fun ProxyConfigDialog(
     account: EmailAccount,
     onDismiss: () -> Unit,
-    onSave: (ProxyConfig?) -> Unit
+    onSaveProxy: (ProxyConfig?) -> Unit
 ) {
     var isProxyEnabled by remember { mutableStateOf(account.proxyConfig?.enabled ?: false) }
     var proxyType by remember { mutableStateOf(account.proxyConfig?.type ?: ProxyType.SOCKS5) }

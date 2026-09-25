@@ -1,5 +1,7 @@
 package com.omnimail.app.ui.screens.accounts
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,8 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -28,16 +28,13 @@ import androidx.compose.ui.window.Dialog
 import com.omnimail.app.model.*
 import com.omnimail.app.service.EmailService
 import com.omnimail.app.ui.components.StatusIndicator
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountManagementScreen(
     accounts: List<EmailAccount>,
-    groups: List<WorkspaceGroup>,
     onAddSingleAccount: (EmailAccount, List<EmailMessage>) -> Unit,
-    onBulkImportAccounts: (List<EmailAccount>) -> Unit,
     onUpdateAccountProxy: (accountId: String, ProxyConfig?) -> Unit,
     onDeleteAccount: (accountId: String) -> Unit = {},
     modifier: Modifier = Modifier
@@ -45,14 +42,7 @@ fun AccountManagementScreen(
     var showMethodPicker by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showWebLoginDialog by remember { mutableStateOf(false) }
-    var showBulkImportDialog by remember { mutableStateOf(false) }
-    var selectedGroupFilter by remember { mutableStateOf<String?>(null) }
     var selectedAccountForProxy by remember { mutableStateOf<EmailAccount?>(null) }
-
-    val filteredAccounts = remember(accounts, selectedGroupFilter) {
-        if (selectedGroupFilter == null) accounts
-        else accounts.filter { it.workspaceGroupId == selectedGroupFilter }
-    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -60,14 +50,11 @@ fun AccountManagementScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Kelola Akun (${accounts.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("Workspaces & Konfigurasi Proxy", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Kelola Akun Email (${accounts.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Bisa login banyak akun & sinkronisasi inbox", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showBulkImportDialog = true }) {
-                        Icon(Icons.Outlined.UploadFile, contentDescription = "Import CSV", tint = MaterialTheme.colorScheme.primary)
-                    }
                     IconButton(onClick = { showMethodPicker = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Tambah Akun", tint = MaterialTheme.colorScheme.primary)
                     }
@@ -83,71 +70,6 @@ fun AccountManagementScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 80.dp)
         ) {
-            // Quick Action Banner
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Impor CSV Akun Massal", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                            Text("Tambah puluhan akun sekaligus via teks/file spreadsheet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Button(
-                            onClick = { showBulkImportDialog = true },
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Impor CSV")
-                        }
-                    }
-                }
-            }
-
-            // Workspace Groups Filter Chips
-            item {
-                Text(
-                    text = "Grup Workspace",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = selectedGroupFilter == null,
-                        onClick = { selectedGroupFilter = null },
-                        label = { Text("Semua (${accounts.size})") }
-                    )
-                    groups.forEach { group ->
-                        val groupAccounts = accounts.count { it.workspaceGroupId == group.id }
-                        val isSelected = selectedGroupFilter == group.id
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedGroupFilter = if (isSelected) null else group.id },
-                            label = { Text("${group.name} ($groupAccounts)") },
-                            leadingIcon = {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(group.colorHex))
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-
             // Account List Header
             item {
                 Row(
@@ -158,7 +80,7 @@ fun AccountManagementScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Daftar Akun (${filteredAccounts.size})",
+                        text = "Daftar Akun Terhubung (${accounts.size})",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -170,7 +92,7 @@ fun AccountManagementScreen(
                 }
             }
 
-            if (filteredAccounts.isEmpty()) {
+            if (accounts.isEmpty()) {
                 item {
                     Card(
                         modifier = Modifier
@@ -187,22 +109,22 @@ fun AccountManagementScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(Icons.Outlined.Email, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                            Text("Belum Ada Akun", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Belum Ada Akun Terhubung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "Tambahkan akun email Anda (Gmail, Outlook, Yahoo, atau Webmail) untuk mulai membaca kotak masuk.",
+                                "Tambahkan akun email Anda (Gmail, Google Workspace kampus, Outlook, Yahoo, atau Webmail) untuk mulai membaca inbox dan berkirim pesan.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Button(onClick = { showMethodPicker = true }, shape = RoundedCornerShape(8.dp)) {
-                                Text("Tambah Akun Pertama")
+                                Text("Tambah Akun Email Pertama")
                             }
                         }
                     }
                 }
             } else {
-                items(filteredAccounts, key = { it.id }) { account ->
+                items(accounts, key = { it.id }) { account ->
                     AccountCard(
                         account = account,
                         onConfigureProxy = { selectedAccountForProxy = account },
@@ -213,7 +135,7 @@ fun AccountManagementScreen(
         }
     }
 
-    // Method Selection Dialog (Web Login vs Manual IMAP vs Bulk)
+    // Method Selection Dialog (Web Login vs Manual IMAP)
     if (showMethodPicker) {
         MethodPickerDialog(
             onDismiss = { showMethodPicker = false },
@@ -224,10 +146,6 @@ fun AccountManagementScreen(
             onSelectManualImap = {
                 showMethodPicker = false
                 showAddDialog = true
-            },
-            onSelectBulkImport = {
-                showMethodPicker = false
-                showBulkImportDialog = true
             }
         )
     }
@@ -235,7 +153,6 @@ fun AccountManagementScreen(
     // Web Login Dialog (Full Screen in-app web login)
     if (showWebLoginDialog) {
         WebLoginDialog(
-            groups = groups,
             onDismiss = { showWebLoginDialog = false },
             onAccountAttached = { newAcc, fetchedEmails ->
                 onAddSingleAccount(newAcc, fetchedEmails)
@@ -247,7 +164,6 @@ fun AccountManagementScreen(
     // Add Single Account Dialog (Manual IMAP/SMTP)
     if (showAddDialog) {
         AddSingleAccountDialog(
-            groups = groups,
             onDismiss = { showAddDialog = false },
             onSwitchToWebLogin = {
                 showAddDialog = false
@@ -256,18 +172,6 @@ fun AccountManagementScreen(
             onAddAccount = { acc, fetchedEmails ->
                 onAddSingleAccount(acc, fetchedEmails)
                 showAddDialog = false
-            }
-        )
-    }
-
-    // Bulk Import CSV Dialog
-    if (showBulkImportDialog) {
-        BulkImportCsvDialog(
-            groups = groups,
-            onDismiss = { showBulkImportDialog = false },
-            onImportComplete = {
-                onBulkImportAccounts(it)
-                showBulkImportDialog = false
             }
         )
     }
@@ -322,7 +226,7 @@ fun AccountCard(
                     )
                     if (account.authType == AuthType.WEB_SESSION) {
                         Text(
-                            text = "Web Session • ${account.webLoginUrl ?: "Webmail / Cloud"}",
+                            text = "Web Session • ${account.imapHost}:${account.imapPort}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 11.sp
@@ -371,7 +275,7 @@ fun AccountCard(
                             },
                             label = {
                                 Text(
-                                    "Web Session (Aktif)",
+                                    "Web Session",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -426,7 +330,6 @@ fun AccountCard(
 
 @Composable
 fun AddSingleAccountDialog(
-    groups: List<WorkspaceGroup>,
     onDismiss: () -> Unit,
     onSwitchToWebLogin: (() -> Unit)? = null,
     onAddAccount: (EmailAccount, List<EmailMessage>) -> Unit
@@ -436,7 +339,6 @@ fun AddSingleAccountDialog(
 
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
-    var selectedGroupId by remember { mutableStateOf(groups.firstOrNull()?.id ?: "") }
 
     var imapHost by remember { mutableStateOf("") }
     var imapPort by remember { mutableStateOf("993") }
@@ -457,6 +359,24 @@ fun AddSingleAccountDialog(
         smtpPort = serverConfig.smtpPort.toString()
         useSsl = serverConfig.useSsl
         loginErrorMessage = null
+
+        // Asynchronously check MX if custom domain
+        if (emailInput.contains("@") && emailInput.substringAfter("@").isNotBlank()) {
+            val resolved = EmailService.resolveMxServerConfig(emailInput)
+            imapHost = resolved.imapHost
+            imapPort = resolved.imapPort.toString()
+            smtpHost = resolved.smtpHost
+            smtpPort = resolved.smtpPort.toString()
+            useSsl = resolved.useSsl
+        }
+    }
+
+    val isGoogleDomain = remember(emailInput, imapHost) {
+        emailInput.contains("gmail", ignoreCase = true) ||
+        emailInput.contains("google", ignoreCase = true) ||
+        emailInput.contains("uniba", ignoreCase = true) ||
+        emailInput.endsWith(".ac.id", ignoreCase = true) ||
+        imapHost.contains("gmail", ignoreCase = true)
     }
 
     Dialog(onDismissRequest = { if (!isLoggingIn) onDismiss() }) {
@@ -472,9 +392,9 @@ fun AddSingleAccountDialog(
                     .padding(20.dp)
                     .fillMaxWidth()
             ) {
-                Text("Login Akun Email (Manual)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Login Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Masuk langsung dengan host IMAP & kata sandi akun email Anda",
+                    "Masuk langsung dengan email & kata sandi akun Anda",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -487,7 +407,7 @@ fun AddSingleAccountDialog(
                     ) {
                         Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Atau Login via Web (Sandi Asli & 2FA)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Atau Login via Web Browser (Sandi Asli & 2FA)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -511,8 +431,8 @@ fun AddSingleAccountDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            if (emailInput.contains("gmail", ignoreCase = true))
-                                "Untuk akun Gmail: Google mewajibkan Sandi Aplikasi (16 karakter). Ketik atau tempel sandi aplikasi akun Google Anda di kolom kata sandi di bawah."
+                            if (isGoogleDomain)
+                                "Akun Google Workspace / Gmail: Google mewajibkan Sandi Aplikasi (App Password 16 karakter) untuk akses IMAP/SMTP native. Masukkan Sandi Aplikasi Anda di bawah."
                             else
                                 "Masukkan email dan kata sandi asli akun Anda. Aplikasi akan langsung terhubung ke server IMAP/SMTP dan memuat kotak masuk Anda secara otomatis.",
                             style = MaterialTheme.typography.labelSmall,
@@ -538,7 +458,7 @@ fun AddSingleAccountDialog(
                 OutlinedTextField(
                     value = passwordInput,
                     onValueChange = { passwordInput = it; loginErrorMessage = null },
-                    label = { Text("Kata Sandi Email (Sandi Asli)") },
+                    label = { Text(if (isGoogleDomain) "Sandi Aplikasi (16 Karakter) / Sandi Asli" else "Kata Sandi Email") },
                     singleLine = true,
                     enabled = !isLoggingIn,
                     visualTransformation = PasswordVisualTransformation(),
@@ -554,7 +474,7 @@ fun AddSingleAccountDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     TextButton(onClick = { showAdvancedServer = !showAdvancedServer }) {
-                        Text(if (showAdvancedServer) "Sembunyikan Pengaturan Server" else "Pengaturan Server Lanjutan (Port/Host)")
+                        Text(if (showAdvancedServer) "Sembunyikan Pengaturan Server" else "Pengaturan Server Lanjutan (Host/Port)")
                     }
                 }
 
@@ -586,7 +506,7 @@ fun AddSingleAccountDialog(
                                     Text("Beralih: Login via Web (Sandi Asli & 2FA)", fontSize = 12.sp)
                                 }
                             }
-                            if (emailInput.contains("gmail", ignoreCase = true) || loginErrorMessage?.contains("Google") == true) {
+                            if (isGoogleDomain) {
                                 OutlinedButton(
                                     onClick = {
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
@@ -669,7 +589,6 @@ fun AddSingleAccountDialog(
                                     email = emailInput.trim(),
                                     displayName = emailInput.substringBefore("@"),
                                     authType = AuthType.IMAP_SMTP_MANUAL,
-                                    workspaceGroupId = selectedGroupId,
                                     colorHex = 0xFF3B82F6,
                                     password = passwordInput,
                                     imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
@@ -682,7 +601,7 @@ fun AddSingleAccountDialog(
                             },
                             enabled = !isLoggingIn
                         ) {
-                            Text("Tetap Simpan Akun")
+                            Text("Tetap Simpan")
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
@@ -698,7 +617,6 @@ fun AddSingleAccountDialog(
                                         email = emailInput.trim(),
                                         displayName = emailInput.substringBefore("@"),
                                         authType = AuthType.IMAP_SMTP_MANUAL,
-                                        workspaceGroupId = selectedGroupId,
                                         colorHex = 0xFF3B82F6,
                                         password = passwordInput,
                                         imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
@@ -723,118 +641,12 @@ fun AddSingleAccountDialog(
                         if (isLoggingIn) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Sedang Login & Membaca Inbox...")
+                            Text("Menghubungkan...")
                         } else {
                             Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Login & Baca Inbox")
                         }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun BulkImportCsvDialog(
-    groups: List<WorkspaceGroup>,
-    onDismiss: () -> Unit,
-    onImportComplete: (List<EmailAccount>) -> Unit
-) {
-    val coroutineScope = rememberCoroutineScope()
-    var csvText by remember { mutableStateOf("") }
-    var selectedGroupId by remember { mutableStateOf(groups.firstOrNull()?.id ?: "") }
-    var isImporting by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf(0f) }
-    var statusText by remember { mutableStateOf("Siap memproses akun") }
-    var verifiedAccounts by remember { mutableStateOf(listOf<EmailAccount>()) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier
-                .fillMaxWidth()
-                .wrapContentHeight()
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text("Bulk Account Import (CSV)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(
-                    "Format tiap baris: email,password_asli (atau email,password_asli,imap_host,imap_port,smtp_host,smtp_port)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = csvText,
-                    onValueChange = { csvText = it },
-                    label = { Text("Tempel Data CSV Akun di Sini") },
-                    placeholder = {
-                        Text("user1@domain.com,password_asli_1\nuser2@perusahaan.com,password_asli_2\nuser3@gmail.com,password_asli_3")
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = {
-                        csvText = "agent1@perusahaan.com,sandi_agent1\nagent2@perusahaan.com,sandi_agent2\ncs@toko.com,sandi_cs"
-                    }) {
-                        Text("Contoh Template", style = MaterialTheme.typography.labelSmall)
-                    }
-
-                    val detectedCount = csvText.lines().count { it.contains("@") }
-                    Text("$detectedCount akun terdeteksi", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-
-                if (isImporting) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(statusText, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss, enabled = !isImporting) { Text("Batal") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            coroutineScope.launch {
-                                isImporting = true
-                                statusText = "Membaca data akun..."
-                                progress = 0.3f
-                                delay(300)
-
-                                val parsed = EmailService.parseCsvAccounts(csvText, selectedGroupId)
-                                progress = 0.7f
-                                statusText = "${parsed.size} akun berhasil diparsing..."
-                                delay(300)
-
-                                progress = 1.0f
-                                isImporting = false
-                                onImportComplete(parsed)
-                            }
-                        },
-                        enabled = csvText.isNotBlank() && !isImporting
-                    ) {
-                        Text(if (isImporting) "Memproses..." else "Impor Akun")
                     }
                 }
             }
@@ -972,8 +784,7 @@ fun ProxyConfigDialog(
 fun MethodPickerDialog(
     onDismiss: () -> Unit,
     onSelectWebLogin: () -> Unit,
-    onSelectManualImap: () -> Unit,
-    onSelectBulkImport: () -> Unit
+    onSelectManualImap: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1074,44 +885,7 @@ fun MethodPickerDialog(
                             Text("Login Manual IMAP / SMTP", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                "Koneksi protokol IMAP/SMTP langsung dengan host/port dan kata sandi/sandi aplikasi.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
-
-                // Option 3: Bulk Import CSV
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectBulkImport() },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Outlined.UploadFile, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(22.dp))
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Impor CSV / Daftar Massal", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                "Tambah puluhan akun sekaligus dari teks atau file spreadsheet.",
+                                "Koneksi protokol IMAP/SMTP dengan auto-detect server & sandi aplikasi.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp
@@ -1129,4 +903,3 @@ fun MethodPickerDialog(
         }
     )
 }
-

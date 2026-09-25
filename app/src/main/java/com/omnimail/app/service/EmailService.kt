@@ -24,7 +24,15 @@ object EmailService {
     fun autoDetectServer(email: String): ServerConfig {
         val domain = email.substringAfter("@", "").lowercase().trim()
         return when {
-            domain.contains("gmail") -> ServerConfig(
+            domain.contains("gmail") || domain.contains("google") -> ServerConfig(
+                imapHost = "imap.gmail.com",
+                imapPort = 993,
+                smtpHost = "smtp.gmail.com",
+                smtpPort = 465,
+                useSsl = true
+            )
+            // Academic and university domains in Indonesia (e.g. uniba-bpn.ac.id) use Google Workspace
+            domain.contains("uniba") || domain.endsWith(".ac.id") || domain.endsWith(".edu") || domain.endsWith(".sch.id") -> ServerConfig(
                 imapHost = "imap.gmail.com",
                 imapPort = 993,
                 smtpHost = "smtp.gmail.com",
@@ -67,13 +75,37 @@ object EmailService {
                 useSsl = true
             )
             else -> ServerConfig(
-                imapHost = "imap.example.com",
+                imapHost = "imap.gmail.com",
                 imapPort = 993,
-                smtpHost = "smtp.example.com",
+                smtpHost = "smtp.gmail.com",
                 smtpPort = 465,
                 useSsl = true
             )
         }
+    }
+
+    suspend fun resolveMxServerConfig(email: String): ServerConfig = withContext(Dispatchers.IO) {
+        val domain = email.substringAfter("@", "").lowercase().trim()
+        if (domain.isBlank()) return@withContext autoDetectServer(email)
+        
+        try {
+            val url = java.net.URL("https://dns.google/resolve?name=$domain&type=MX")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 2500
+            conn.readTimeout = 2500
+            conn.requestMethod = "GET"
+            if (conn.responseCode == 200) {
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                if (body.contains("google.com") || body.contains("googlemail.com") || body.contains("aspmx")) {
+                    return@withContext ServerConfig("imap.gmail.com", 993, "smtp.gmail.com", 465, true)
+                }
+                if (body.contains("outlook.com") || body.contains("office365.com") || body.contains("pphosted")) {
+                    return@withContext ServerConfig("outlook.office365.com", 993, "smtp.office365.com", 587, false)
+                }
+            }
+        } catch (_: Exception) {}
+        
+        autoDetectServer(email)
     }
 
     private fun getImapStore(account: EmailAccount, port: Int, useSsl: Boolean): Pair<Session, Store> {
@@ -117,7 +149,8 @@ object EmailService {
 
     private fun connectToStore(account: EmailAccount): Pair<Store, EmailAccount> {
         val domain = account.email.substringAfter("@", "").lowercase().trim()
-        val isGmail = domain.contains("gmail") || account.imapHost.contains("gmail")
+        val isGmail = domain.contains("gmail") || domain.contains("google") || domain.contains("uniba") ||
+                domain.endsWith(".ac.id") || domain.endsWith(".edu") || account.imapHost.contains("gmail")
         val isWellKnownSsl = isGmail || domain.contains("yahoo") || account.imapHost.contains("yahoo") ||
                 domain.contains("outlook") || account.imapHost.contains("outlook") || account.imapHost.contains("office365")
 
@@ -407,55 +440,5 @@ object EmailService {
         } catch (e: Exception) {
             ""
         }
-    }
-
-    fun parseCsvAccounts(csvContent: String, defaultGroupId: String): List<EmailAccount> {
-        val result = mutableListOf<EmailAccount>()
-        val lines = csvContent.lines()
-        val accountColors = listOf(
-            0xFF6750A4, 0xFF006D77, 0xFFD84A1B, 0xFF2E7D32,
-            0xFF8338EC, 0xFF3A86FF, 0xFFE63946, 0xFF2A9D8F
-        )
-
-        for ((index, line) in lines.withIndex()) {
-            val trimmed = line.trim()
-            if (trimmed.isBlank() || trimmed.startsWith("#") || trimmed.lowercase().startsWith("email")) {
-                continue
-            }
-
-            val parts = trimmed.split(",").map { it.trim() }
-            if (parts.isNotEmpty() && parts[0].contains("@")) {
-                val email = parts[0]
-                val password = if (parts.size > 1) parts[1] else ""
-                val serverConfig = autoDetectServer(email)
-
-                val imapHost = if (parts.size > 2 && parts[2].isNotBlank()) parts[2] else serverConfig.imapHost
-                val imapPort = if (parts.size > 3 && parts[3].toIntOrNull() != null) parts[3].toInt() else serverConfig.imapPort
-                val smtpHost = if (parts.size > 4 && parts[4].isNotBlank()) parts[4] else serverConfig.smtpHost
-                val smtpPort = if (parts.size > 5 && parts[5].toIntOrNull() != null) parts[5].toInt() else serverConfig.smtpPort
-
-                val color = accountColors[index % accountColors.size]
-                val id = "acc_${System.currentTimeMillis()}_$index"
-
-                result.add(
-                    EmailAccount(
-                        id = id,
-                        email = email,
-                        displayName = email.substringBefore("@"),
-                        authType = AuthType.IMAP_SMTP_MANUAL,
-                        workspaceGroupId = defaultGroupId,
-                        colorHex = color,
-                        password = password,
-                        imapHost = imapHost,
-                        imapPort = imapPort,
-                        smtpHost = smtpHost,
-                        smtpPort = smtpPort,
-                        useSsl = serverConfig.useSsl,
-                        status = AccountStatus.ONLINE
-                    )
-                )
-            }
-        }
-        return result
     }
 }

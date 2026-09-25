@@ -66,7 +66,7 @@ data class EmailAccount(
     val email: String,
     val displayName: String,
     val authType: AuthType,
-    val workspaceGroupId: String,
+    val workspaceGroupId: String = "",
     val colorHex: Long, // ARGB representation
     val unreadCount: Int = 0,
     val status: AccountStatus = AccountStatus.ONLINE,

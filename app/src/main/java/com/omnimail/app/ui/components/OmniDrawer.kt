@@ -1,7 +1,6 @@
 package com.omnimail.app.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,19 +19,18 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnimail.app.model.EmailAccount
 import com.omnimail.app.model.EmailFolder
 import com.omnimail.app.model.EmailMessage
-import com.omnimail.app.model.WorkspaceGroup
 
 @Composable
 fun OmniDrawerContent(
     selectedFolder: EmailFolder,
     onSelectFolder: (EmailFolder) -> Unit,
-    groups: List<WorkspaceGroup>,
-    selectedGroupId: String?, // null = All Workspaces / Unified
-    onSelectGroup: (String?) -> Unit,
+    accounts: List<EmailAccount>,
+    selectedAccountId: String?, // null = Semua Akun (Unified)
+    onSelectAccount: (String?) -> Unit,
     onNavigateAccounts: () -> Unit,
-    onOpenBulkImport: () -> Unit,
     onNavigateSettings: () -> Unit,
     emails: List<EmailMessage> = emptyList(),
     modifier: Modifier = Modifier
@@ -74,7 +72,7 @@ fun OmniDrawerContent(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Mass Multi-Account Client",
+                        text = "Multi-Account Email Client",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -82,7 +80,7 @@ fun OmniDrawerContent(
             }
 
             HorizontalDivider(
-                modifier = Modifier.padding(vertical = 12.dp),
+                modifier = Modifier.padding(vertical = 10.dp),
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
 
@@ -90,10 +88,10 @@ fun OmniDrawerContent(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Section: Workspaces / Groups
+                // Section: Folders
                 item {
                     Text(
-                        text = "WORKSPACES / GRUP AKUN",
+                        text = "KOTAK SURAT",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold,
@@ -101,89 +99,6 @@ fun OmniDrawerContent(
                     )
                 }
 
-                // All accounts item
-                item {
-                    NavigationDrawerItem(
-                        icon = {
-                            Icon(
-                                Icons.Default.Layers,
-                                contentDescription = null,
-                                tint = if (selectedGroupId == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        label = {
-                            Text(
-                                "Semua Akun (Unified)",
-                                fontWeight = if (selectedGroupId == null) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        selected = selectedGroupId == null,
-                        onClick = { onSelectGroup(null) },
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-
-                items(groups) { group ->
-                    val isSelected = selectedGroupId == group.id
-                    val groupColor = Color(group.colorHex)
-
-                    NavigationDrawerItem(
-                        icon = {
-                            Box(
-                                modifier = Modifier
-                                    .size(12.dp)
-                                    .clip(CircleShape)
-                                    .background(groupColor)
-                            )
-                        },
-                        label = {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = group.name,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
-                                Surface(
-                                    shape = CircleShape,
-                                    color = groupColor.copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        text = "${group.accountIds.size}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = groupColor,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        },
-                        selected = isSelected,
-                        onClick = { onSelectGroup(group.id) },
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-
-                item {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 12.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                    )
-                    Text(
-                        text = "FOLDERS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-
-                // Folders list
                 val inboxUnread = emails.count { it.folder == EmailFolder.INBOX && !it.isRead }
                 val draftsCount = emails.count { it.folder == EmailFolder.DRAFTS }
                 val starredCount = emails.count { it.isStarred }
@@ -245,6 +160,93 @@ fun OmniDrawerContent(
                         onClick = { onSelectFolder(EmailFolder.SPAM) }
                     )
                 }
+
+                // Section: Akun Email
+                item {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    Text(
+                        text = "AKUN EMAIL (${accounts.size})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
+                // Unified / Semua Akun Item
+                item {
+                    NavigationDrawerItem(
+                        icon = {
+                            Icon(
+                                Icons.Default.Layers,
+                                contentDescription = null,
+                                tint = if (selectedAccountId == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Semua Akun (Unified)",
+                                fontWeight = if (selectedAccountId == null) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        selected = selectedAccountId == null,
+                        onClick = { onSelectAccount(null) },
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                items(accounts, key = { it.id }) { acc ->
+                    val isSelected = selectedAccountId == acc.id
+                    val accColor = Color(acc.colorHex)
+                    val accUnread = emails.count { it.accountId == acc.id && !it.isRead }
+
+                    NavigationDrawerItem(
+                        icon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(accColor)
+                            )
+                        },
+                        label = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = acc.displayName.ifBlank { acc.email },
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                    maxLines = 1
+                                )
+                                if (accUnread > 0) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = accColor.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "$accUnread",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = accColor,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        selected = isSelected,
+                        onClick = { onSelectAccount(acc.id) },
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
             }
 
             HorizontalDivider(
@@ -255,27 +257,6 @@ fun OmniDrawerContent(
             // Bottom Actions in Drawer
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 TextButton(
-                    onClick = onOpenBulkImport,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.UploadFile,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        "Import Akun Massal (CSV)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                TextButton(
                     onClick = onNavigateAccounts,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
@@ -283,15 +264,16 @@ fun OmniDrawerContent(
                     Icon(
                         Icons.Outlined.ManageAccounts,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        "Kelola Akun & Proxy",
+                        "Kelola Akun & Server",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Medium
                     )
                 }
 

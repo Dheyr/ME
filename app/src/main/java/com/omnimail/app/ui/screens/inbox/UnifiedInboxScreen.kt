@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.sp
 import com.omnimail.app.model.EmailAccount
 import com.omnimail.app.model.EmailFolder
 import com.omnimail.app.model.EmailMessage
-import com.omnimail.app.model.WorkspaceGroup
 import com.omnimail.app.ui.components.AccountBadge
 import com.omnimail.app.ui.components.BulkActionBar
 
@@ -35,10 +34,9 @@ import com.omnimail.app.ui.components.BulkActionBar
 fun UnifiedInboxScreen(
     emails: List<EmailMessage>,
     accounts: List<EmailAccount>,
-    groups: List<WorkspaceGroup>,
-    selectedGroupId: String?,
+    selectedAccountId: String?,
     selectedFolder: EmailFolder = EmailFolder.INBOX,
-    onSelectGroup: (String?) -> Unit,
+    onSelectAccount: (String?) -> Unit,
     onEmailClick: (EmailMessage) -> Unit,
     onToggleStar: (String) -> Unit,
     onDeleteEmail: (String) -> Unit,
@@ -54,16 +52,15 @@ fun UnifiedInboxScreen(
 
     var activeQuickFilter by remember { mutableStateOf("ALL") } // ALL, UNREAD, ATTACHMENTS, STARRED
 
-    val filteredEmails = remember(emails, selectedGroupId, activeQuickFilter, selectedFolder) {
+    val filteredEmails = remember(emails, selectedAccountId, activeQuickFilter, selectedFolder) {
         emails.filter { email ->
             val matchFolder = when (selectedFolder) {
                 EmailFolder.STARRED -> email.isStarred
                 else -> email.folder == selectedFolder
             }
 
-            val matchGroup = if (selectedGroupId != null) {
-                val group = groups.find { it.id == selectedGroupId }
-                group?.accountIds?.contains(email.accountId) == true
+            val matchAccount = if (selectedAccountId != null) {
+                email.accountId == selectedAccountId
             } else true
 
             val matchFilter = when (activeQuickFilter) {
@@ -73,7 +70,7 @@ fun UnifiedInboxScreen(
                 else -> true
             }
 
-            matchFolder && matchGroup && matchFilter
+            matchFolder && matchAccount && matchFilter
         }
     }
 
@@ -102,11 +99,61 @@ fun UnifiedInboxScreen(
             )
         }
 
-        // Quick Filter Chips Bar
+        // Account Switcher Bar (Filter: Semua Akun vs Akun Spesifik)
+        if (accounts.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                item {
+                    val totalFolderEmails = emails.count { it.folder == selectedFolder }
+                    FilterChip(
+                        selected = selectedAccountId == null,
+                        onClick = { onSelectAccount(null) },
+                        label = {
+                            Text(
+                                "Semua Akun ($totalFolderEmails)",
+                                fontWeight = if (selectedAccountId == null) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        leadingIcon = if (selectedAccountId == null) {
+                            { Icon(Icons.Default.Done, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
+                items(accounts, key = { it.id }) { acc ->
+                    val accCount = emails.count { it.accountId == acc.id && it.folder == selectedFolder }
+                    val isSelected = selectedAccountId == acc.id
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { onSelectAccount(if (isSelected) null else acc.id) },
+                        label = {
+                            Text(
+                                "${acc.displayName.ifBlank { acc.email }} ($accCount)",
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(acc.colorHex))
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
+        // Quick Filter Chips Bar (Semua, Belum Dibaca, Lampiran, Berbintang)
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -114,10 +161,7 @@ fun UnifiedInboxScreen(
                 FilterChip(
                     selected = activeQuickFilter == "ALL",
                     onClick = { activeQuickFilter = "ALL" },
-                    label = { Text("Semua (${filteredEmails.size})") },
-                    leadingIcon = if (activeQuickFilter == "ALL") {
-                        { Icon(Icons.Default.Done, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
+                    label = { Text("Filter: Semua (${filteredEmails.size})") }
                 )
             }
             item {
@@ -185,7 +229,7 @@ fun UnifiedInboxScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Tambahkan akun email Anda untuk mulai mengelola kotak masuk.",
+                            text = "Tambahkan akun email Anda untuk mulai membaca kotak masuk dan berkirim pesan.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -283,7 +327,6 @@ fun UnifiedInboxScreen(
                     )
                 }
 
-                // Lazy Loading indicator at the bottom (FR 2.4 Offline Caching & Lazy Loading)
                 item {
                     Column(
                         modifier = Modifier
@@ -292,22 +335,22 @@ fun UnifiedInboxScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "Menampilkan 50 email terakhir dari cache lokal",
+                            text = "Menampilkan ${filteredEmails.size} email",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedButton(
-                            onClick = { /* Trigger fetch older emails from IMAP */ },
+                            onClick = onManualSync,
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Icon(
-                                Icons.Outlined.CloudDownload,
+                                Icons.Default.Sync,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Muat Email Lebih Lama dari Server")
+                            Text("Sinkronkan Kotak Masuk")
                         }
                     }
                 }

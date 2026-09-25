@@ -129,17 +129,11 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("RAM Di Latar Belakang", fontWeight = FontWeight.Medium)
-                                Text("Batas aman: 300MB - 500MB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Penyimpanan & Memori Lokal", fontWeight = FontWeight.Medium)
+                                Text("Penggunaan memori ringan dan terenkripsi", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text("184 MB", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("Optimal", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        LinearProgressIndicator(
-                            progress = { 184f / 500f },
-                            modifier = Modifier.fillMaxWidth()
-                        )
 
                         Spacer(modifier = Modifier.height(12.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
@@ -173,7 +167,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Outlined.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Bersihkan Cache Sekarang (Hemat 420 MB)")
+                            Text("Bersihkan Cache & Riwayat Lokal")
                         }
                     }
                 }

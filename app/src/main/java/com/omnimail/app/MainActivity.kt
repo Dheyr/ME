@@ -35,7 +35,6 @@ import com.omnimail.app.ui.screens.detail.EmailDetailScreen
 import com.omnimail.app.ui.screens.inbox.UnifiedInboxScreen
 import com.omnimail.app.ui.screens.search.GlobalSearchScreen
 import com.omnimail.app.ui.screens.settings.SettingsScreen
-import com.omnimail.app.ui.screens.webmail.WebmailScreen
 import com.omnimail.app.ui.theme.OmniMailTheme
 import kotlinx.coroutines.launch
 
@@ -173,7 +172,8 @@ fun OmniMailApp() {
                         currentTab = NavigationTab.SETTINGS
                         activeEmailDetail = null
                         coroutineScope.launch { drawerState.close() }
-                    }
+                    },
+                    emails = emails
                 )
             }
         ) {
@@ -316,6 +316,7 @@ fun OmniMailApp() {
                                         accounts = accounts,
                                         groups = groups,
                                         selectedGroupId = selectedGroupId,
+                                        selectedFolder = selectedFolder,
                                         onSelectGroup = { selectedGroupId = it },
                                         onEmailClick = { email ->
                                             emails = emails.map {
@@ -352,11 +353,6 @@ fun OmniMailApp() {
                                         onManualSync = { syncAllAccounts() }
                                     )
                                 }
-                                NavigationTab.WEBMAIL -> {
-                                    WebmailScreen(
-                                        onNavigateBack = { currentTab = NavigationTab.INBOX }
-                                    )
-                                }
                                 NavigationTab.SEARCH -> {
                                     GlobalSearchScreen(
                                         allEmails = emails,
@@ -379,40 +375,37 @@ fun OmniMailApp() {
                                     AccountManagementScreen(
                                         accounts = accounts,
                                         groups = groups,
-                                        onAddSingleAccount = { newAcc ->
-                                            val updated = accounts + newAcc
+                                        onAddSingleAccount = { newAcc, fetchedEmails ->
+                                            val updated = accounts + newAcc.copy(unreadCount = fetchedEmails.count { !it.isRead }, status = AccountStatus.ONLINE)
                                             accounts = updated
                                             OmniStorage.saveAccounts(context, updated)
 
                                             groups = groups.map { grp ->
-                                                if (grp.id == newAcc.workspaceGroupId) grp.copy(accountIds = grp.accountIds + newAcc.id) else grp
+                                                 if (grp.id == newAcc.workspaceGroupId) grp.copy(accountIds = grp.accountIds + newAcc.id) else grp
                                             }
                                             OmniStorage.saveGroups(context, groups)
 
-                                            // Automatically trigger sync for newly added account
+                                            if (fetchedEmails.isNotEmpty()) {
+                                                val merged = (fetchedEmails + emails).distinctBy { it.id }.sortedByDescending { it.timestamp }
+                                                emails = merged
+                                                OmniStorage.saveEmails(context, merged)
+                                            }
+
+                                            // Langsung beralih ke layar Inbox
+                                            currentTab = NavigationTab.INBOX
+                                            selectedFolder = EmailFolder.INBOX
                                             coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Akun ${newAcc.email} ditambahkan. Menarik email...")
-                                                val res = EmailService.fetchInboxEmails(newAcc, limit = 25)
-                                                if (res.isSuccess) {
-                                                    val fetched = res.getOrDefault(emptyList())
-                                                    val merged = (fetched + emails).distinctBy { it.id }.sortedByDescending { it.timestamp }
-                                                    emails = merged
-                                                    OmniStorage.saveEmails(context, merged)
-                                                    val refreshedAccounts = accounts.map {
-                                                        if (it.id == newAcc.id) it.copy(unreadCount = fetched.count { m -> !m.isRead }) else it
-                                                    }
-                                                    accounts = refreshedAccounts
-                                                    OmniStorage.saveAccounts(context, refreshedAccounts)
-                                                    snackbarHostState.showSnackbar("${fetched.size} email berhasil ditarik dari ${newAcc.email}!")
-                                                }
+                                                snackbarHostState.showSnackbar("Login berhasil! ${fetchedEmails.size} email baru dimuat.")
                                             }
                                         },
                                         onBulkImportAccounts = { importedList ->
                                             val updated = accounts + importedList
                                             accounts = updated
                                             OmniStorage.saveAccounts(context, updated)
+                                            currentTab = NavigationTab.INBOX
+                                            selectedFolder = EmailFolder.INBOX
                                             coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("${importedList.size} akun berhasil diimpor! Menarik email...")
+                                                snackbarHostState.showSnackbar("${importedList.size} akun berhasil diimpor! Menarik kotak masuk...")
                                                 syncAllAccounts()
                                             }
                                         },

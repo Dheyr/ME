@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnimail.app.model.EmailFolder
+import com.omnimail.app.model.EmailMessage
 import com.omnimail.app.model.WorkspaceGroup
 
 @Composable
@@ -33,6 +34,7 @@ fun OmniDrawerContent(
     onNavigateAccounts: () -> Unit,
     onOpenBulkImport: () -> Unit,
     onNavigateSettings: () -> Unit,
+    emails: List<EmailMessage> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     ModalDrawerSheet(
@@ -182,11 +184,18 @@ fun OmniDrawerContent(
                 }
 
                 // Folders list
+                val inboxUnread = emails.count { it.folder == EmailFolder.INBOX && !it.isRead }
+                val draftsCount = emails.count { it.folder == EmailFolder.DRAFTS }
+                val starredCount = emails.count { it.isStarred }
+                val sentCount = emails.count { it.folder == EmailFolder.SENT }
+                val trashCount = emails.count { it.folder == EmailFolder.TRASH }
+                val spamCount = emails.count { it.folder == EmailFolder.SPAM }
+
                 item {
                     FolderDrawerItem(
                         icon = Icons.Outlined.Inbox,
                         label = "Kotak Masuk (Inbox)",
-                        unread = "28",
+                        unread = if (inboxUnread > 0) "$inboxUnread" else null,
                         isSelected = selectedFolder == EmailFolder.INBOX,
                         onClick = { onSelectFolder(EmailFolder.INBOX) }
                     )
@@ -195,7 +204,7 @@ fun OmniDrawerContent(
                     FolderDrawerItem(
                         icon = Icons.Outlined.StarBorder,
                         label = "Berbintang (Starred)",
-                        unread = null,
+                        unread = if (starredCount > 0) "$starredCount" else null,
                         isSelected = selectedFolder == EmailFolder.STARRED,
                         onClick = { onSelectFolder(EmailFolder.STARRED) }
                     )
@@ -204,7 +213,7 @@ fun OmniDrawerContent(
                     FolderDrawerItem(
                         icon = Icons.Outlined.Send,
                         label = "Terkirim (Sent)",
-                        unread = null,
+                        unread = if (sentCount > 0) "$sentCount" else null,
                         isSelected = selectedFolder == EmailFolder.SENT,
                         onClick = { onSelectFolder(EmailFolder.SENT) }
                     )
@@ -213,7 +222,7 @@ fun OmniDrawerContent(
                     FolderDrawerItem(
                         icon = Icons.Outlined.Drafts,
                         label = "Draf (Drafts)",
-                        unread = "3",
+                        unread = if (draftsCount > 0) "$draftsCount" else null,
                         isSelected = selectedFolder == EmailFolder.DRAFTS,
                         onClick = { onSelectFolder(EmailFolder.DRAFTS) }
                     )
@@ -222,7 +231,7 @@ fun OmniDrawerContent(
                     FolderDrawerItem(
                         icon = Icons.Outlined.DeleteOutline,
                         label = "Sampah (Trash)",
-                        unread = null,
+                        unread = if (trashCount > 0) "$trashCount" else null,
                         isSelected = selectedFolder == EmailFolder.TRASH,
                         onClick = { onSelectFolder(EmailFolder.TRASH) }
                     )
@@ -231,7 +240,7 @@ fun OmniDrawerContent(
                     FolderDrawerItem(
                         icon = Icons.Outlined.ReportGmailerrorred,
                         label = "Spam",
-                        unread = null,
+                        unread = if (spamCount > 0) "$spamCount" else null,
                         isSelected = selectedFolder == EmailFolder.SPAM,
                         onClick = { onSelectFolder(EmailFolder.SPAM) }
                     )

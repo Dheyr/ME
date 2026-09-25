@@ -114,46 +114,61 @@ object EmailService {
         return Pair(session, store)
     }
 
-    suspend fun testConnection(account: EmailAccount): Result<Boolean> = withContext(Dispatchers.IO) {
-        // Multi-fallback strategy: Try configured SSL, then STARTTLS, try full email then username
-        val attempts = listOf(
-            Triple(account.imapPort, account.useSsl, account.email),
-            Triple(if (account.imapPort == 993) 143 else 993, !account.useSsl, account.email),
-            Triple(account.imapPort, account.useSsl, account.email.substringBefore("@"))
-        )
+    private fun connectToStore(account: EmailAccount): Pair<Store, EmailAccount> {
+        val domain = account.email.substringAfter("@", "").lowercase().trim()
+        val hostsToTry = if (account.imapHost.startsWith("mail.") && domain.isNotBlank()) {
+            listOf(account.imapHost, "imap.$domain")
+        } else {
+            listOf(account.imapHost)
+        }
 
         var lastError: Exception? = null
 
-        for ((port, ssl, user) in attempts) {
-            try {
-                val (_, store) = getImapStore(account, port, ssl)
-                store.connect(account.imapHost, port, user, account.password)
-                if (store.isConnected) {
-                    store.close()
-                    return@withContext Result.success(true)
+        for (host in hostsToTry) {
+            val acc = account.copy(imapHost = host)
+            val attempts = listOf(
+                Triple(acc.imapPort, acc.useSsl, acc.email),
+                Triple(if (acc.imapPort == 993) 143 else 993, !acc.useSsl, acc.email),
+                Triple(acc.imapPort, acc.useSsl, acc.email.substringBefore("@")),
+                Triple(if (acc.imapPort == 993) 143 else 993, !acc.useSsl, acc.email.substringBefore("@"))
+            )
+
+            for ((port, ssl, user) in attempts) {
+                try {
+                    val (_, store) = getImapStore(acc, port, ssl)
+                    store.connect(host, port, user, acc.password)
+                    if (store.isConnected) {
+                        return Pair(store, acc.copy(imapPort = port, useSsl = ssl))
+                    }
+                } catch (e: Exception) {
+                    lastError = e
                 }
-            } catch (e: Exception) {
-                lastError = e
             }
         }
 
-        val msg = lastError?.localizedMessage ?: lastError?.message ?: "Gagal terhubung ke server IMAP"
-        Result.failure(Exception(msg))
+        throw lastError ?: Exception("Tidak dapat terhubung ke server IMAP dengan kredensial yang diberikan.")
     }
 
-    suspend fun fetchInboxEmails(account: EmailAccount, limit: Int = 30): Result<List<EmailMessage>> = withContext(Dispatchers.IO) {
+    suspend fun testConnection(account: EmailAccount): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val (store, _) = connectToStore(account)
+            store.close()
+            Result.success(true)
+        } catch (e: Exception) {
+            val msg = e.localizedMessage ?: e.message ?: "Gagal terhubung ke server IMAP"
+            Result.failure(Exception(msg))
+        }
+    }
+
+    suspend fun loginAndFetchInbox(
+        account: EmailAccount,
+        limit: Int = 30
+    ): Result<Pair<EmailAccount, List<EmailMessage>>> = withContext(Dispatchers.IO) {
         var store: Store? = null
         var folder: Folder? = null
         try {
-            // Connect with fallback
-            val (_, s) = getImapStore(account, account.imapPort, account.useSsl)
-            store = s
-            try {
-                store.connect(account.imapHost, account.imapPort, account.email, account.password)
-            } catch (e: Exception) {
-                // Try fallback username without domain
-                store.connect(account.imapHost, account.imapPort, account.email.substringBefore("@"), account.password)
-            }
+            val (connectedStore, workingAccount) = connectToStore(account)
+            store = connectedStore
 
             folder = store.getFolder("INBOX")
             folder.open(Folder.READ_ONLY)
@@ -162,7 +177,7 @@ object EmailService {
             if (totalMessages == 0) {
                 folder.close(false)
                 store.close()
-                return@withContext Result.success(emptyList())
+                return@withContext Result.success(Pair(workingAccount, emptyList()))
             }
 
             val start = (totalMessages - limit + 1).coerceAtLeast(1)
@@ -200,17 +215,17 @@ object EmailService {
                 val bodyText = extractText(msg)
                 val snippet = bodyText.take(160).replace("\n", " ").trim()
 
-                val emailId = "${account.id}_${msg.messageNumber}_${sentDate.time}"
+                val emailId = "${workingAccount.id}_${msg.messageNumber}_${sentDate.time}"
 
                 emailList.add(
                     EmailMessage(
                         id = emailId,
-                        accountId = account.id,
-                        accountEmail = account.email,
-                        accountColorHex = account.colorHex,
+                        accountId = workingAccount.id,
+                        accountEmail = workingAccount.email,
+                        accountColorHex = workingAccount.colorHex,
                         senderName = senderName,
                         senderEmail = senderEmail,
-                        recipients = listOf(account.email),
+                        recipients = listOf(workingAccount.email),
                         subject = subject,
                         snippet = snippet.ifBlank { "Tidak ada pratinjau teks" },
                         bodyText = bodyText.ifBlank { "Isi email tidak memiliki teks sederhana." },
@@ -227,11 +242,20 @@ object EmailService {
 
             folder.close(false)
             store.close()
-            Result.success(emailList)
+            Result.success(Pair(workingAccount, emailList))
         } catch (e: Exception) {
             folder?.let { runCatching { if (it.isOpen) it.close(false) } }
             store?.let { runCatching { if (it.isConnected) it.close() } }
-            Result.failure(Exception(e.localizedMessage ?: e.message ?: "Gagal mengambil pesan IMAP"))
+            Result.failure(Exception(e.localizedMessage ?: e.message ?: "Gagal login dan mengambil inbox"))
+        }
+    }
+
+    suspend fun fetchInboxEmails(account: EmailAccount, limit: Int = 30): Result<List<EmailMessage>> = withContext(Dispatchers.IO) {
+        val res = loginAndFetchInbox(account, limit)
+        if (res.isSuccess) {
+            Result.success(res.getOrThrow().second)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Gagal mengambil email"))
         }
     }
 

@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnimail.app.model.EmailAccount
+import com.omnimail.app.model.EmailFolder
 import com.omnimail.app.model.EmailMessage
 import com.omnimail.app.model.WorkspaceGroup
 import com.omnimail.app.ui.components.AccountBadge
@@ -36,6 +37,7 @@ fun UnifiedInboxScreen(
     accounts: List<EmailAccount>,
     groups: List<WorkspaceGroup>,
     selectedGroupId: String?,
+    selectedFolder: EmailFolder = EmailFolder.INBOX,
     onSelectGroup: (String?) -> Unit,
     onEmailClick: (EmailMessage) -> Unit,
     onToggleStar: (String) -> Unit,
@@ -52,8 +54,13 @@ fun UnifiedInboxScreen(
 
     var activeQuickFilter by remember { mutableStateOf("ALL") } // ALL, UNREAD, ATTACHMENTS, STARRED
 
-    val filteredEmails = remember(emails, selectedGroupId, activeQuickFilter) {
+    val filteredEmails = remember(emails, selectedGroupId, activeQuickFilter, selectedFolder) {
         emails.filter { email ->
+            val matchFolder = when (selectedFolder) {
+                EmailFolder.STARRED -> email.isStarred
+                else -> email.folder == selectedFolder
+            }
+
             val matchGroup = if (selectedGroupId != null) {
                 val group = groups.find { it.id == selectedGroupId }
                 group?.accountIds?.contains(email.accountId) == true
@@ -66,7 +73,7 @@ fun UnifiedInboxScreen(
                 else -> true
             }
 
-            matchGroup && matchFilter
+            matchFolder && matchGroup && matchFilter
         }
     }
 
@@ -178,7 +185,7 @@ fun UnifiedInboxScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Tambahkan akun email Anda (Gmail dengan Sandi Aplikasi, Outlook, Yahoo, atau IMAP kustom) untuk mulai mengelola kotak masuk.",
+                            text = "Tambahkan akun email Anda untuk mulai mengelola kotak masuk.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -194,6 +201,16 @@ fun UnifiedInboxScreen(
                         }
                     }
                 } else {
+                    val (emptyTitle, emptyDesc) = when (selectedFolder) {
+                        EmailFolder.INBOX -> "Kotak Masuk Kosong" to "Tarik email terbaru dari server IMAP akun yang terhubung."
+                        EmailFolder.DRAFTS -> "Belum Ada Draf" to "Tidak ada draf email yang tersimpan."
+                        EmailFolder.SENT -> "Belum Ada Email Terkirim" to "Email yang Anda kirim akan muncul di sini."
+                        EmailFolder.STARRED -> "Belum Ada Email Berbintang" to "Tandai email dengan bintang untuk menyimpannya di sini."
+                        EmailFolder.TRASH -> "Kotak Sampah Kosong" to "Tidak ada email di kotak sampah."
+                        EmailFolder.SPAM -> "Tidak Ada Spam" to "Kotak spam bersih."
+                        EmailFolder.ARCHIVE -> "Arsip Kosong" to "Tidak ada email di arsip."
+                    }
+
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -205,24 +222,26 @@ fun UnifiedInboxScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                         Text(
-                            text = "Kotak Masuk Masih Kosong",
+                            text = emptyTitle,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Tarik email terbaru dari server IMAP akun yang terhubung.",
+                            text = emptyDesc,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedButton(
-                            onClick = onManualSync,
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Sinkronkan Sekarang")
+                        if (selectedFolder == EmailFolder.INBOX) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedButton(
+                                onClick = onManualSync,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Sinkronkan Sekarang")
+                            }
                         }
                     }
                 }

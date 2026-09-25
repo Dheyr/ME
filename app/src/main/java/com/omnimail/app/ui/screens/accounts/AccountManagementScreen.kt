@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 fun AccountManagementScreen(
     accounts: List<EmailAccount>,
     groups: List<WorkspaceGroup>,
-    onAddSingleAccount: (EmailAccount) -> Unit,
+    onAddSingleAccount: (EmailAccount, List<EmailMessage>) -> Unit,
     onBulkImportAccounts: (List<EmailAccount>) -> Unit,
     onUpdateAccountProxy: (accountId: String, ProxyConfig?) -> Unit,
     onDeleteAccount: (accountId: String) -> Unit = {},
@@ -213,8 +213,8 @@ fun AccountManagementScreen(
         AddSingleAccountDialog(
             groups = groups,
             onDismiss = { showAddDialog = false },
-            onAddAccount = {
-                onAddSingleAccount(it)
+            onAddAccount = { acc, fetchedEmails ->
+                onAddSingleAccount(acc, fetchedEmails)
                 showAddDialog = false
             }
         )
@@ -363,7 +363,7 @@ fun AccountCard(
 fun AddSingleAccountDialog(
     groups: List<WorkspaceGroup>,
     onDismiss: () -> Unit,
-    onAddAccount: (EmailAccount) -> Unit
+    onAddAccount: (EmailAccount, List<EmailMessage>) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
 
@@ -378,10 +378,8 @@ fun AddSingleAccountDialog(
     var useSsl by remember { mutableStateOf(true) }
 
     var showAdvancedServer by remember { mutableStateOf(false) }
-
-    var isTestingConnection by remember { mutableStateOf(false) }
-    var testSuccess by remember { mutableStateOf<Boolean?>(null) }
-    var testErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isLoggingIn by remember { mutableStateOf(false) }
+    var loginErrorMessage by remember { mutableStateOf<String?>(null) }
 
     // Auto-detect server settings based on domain
     LaunchedEffect(emailInput) {
@@ -391,11 +389,10 @@ fun AddSingleAccountDialog(
         smtpHost = serverConfig.smtpHost
         smtpPort = serverConfig.smtpPort.toString()
         useSsl = serverConfig.useSsl
-        testSuccess = null
-        testErrorMessage = null
+        loginErrorMessage = null
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = { if (!isLoggingIn) onDismiss() }) {
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -408,9 +405,9 @@ fun AddSingleAccountDialog(
                     .padding(20.dp)
                     .fillMaxWidth()
             ) {
-                Text("Tambah Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Login Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Mendukung login langsung dengan kata sandi asli email Anda",
+                    "Masuk langsung dengan kata sandi asli akun email Anda",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -435,7 +432,7 @@ fun AddSingleAccountDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Anda dapat memasukkan kata sandi asli email Anda di sini. Untuk Gmail & webmail lainnya, Anda juga dapat membuka tab 'Webmail' di navigasi bawah untuk login langsung seperti di browser.",
+                            "Masukkan email dan kata sandi asli akun Anda. Aplikasi akan langsung terhubung ke server IMAP/SMTP dan memuat kotak masuk Anda secara otomatis.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -446,10 +443,11 @@ fun AddSingleAccountDialog(
 
                 OutlinedTextField(
                     value = emailInput,
-                    onValueChange = { emailInput = it },
+                    onValueChange = { emailInput = it; loginErrorMessage = null },
                     label = { Text("Alamat Email Lengkap") },
                     placeholder = { Text("contoh@domain.com") },
                     singleLine = true,
+                    enabled = !isLoggingIn,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -457,89 +455,29 @@ fun AddSingleAccountDialog(
 
                 OutlinedTextField(
                     value = passwordInput,
-                    onValueChange = {
-                        passwordInput = it
-                        testSuccess = null
-                    },
+                    onValueChange = { passwordInput = it; loginErrorMessage = null },
                     label = { Text("Kata Sandi Email (Sandi Asli)") },
                     singleLine = true,
+                    enabled = !isLoggingIn,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Test Connection Section
+                // Toggle advanced settings
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     TextButton(onClick = { showAdvancedServer = !showAdvancedServer }) {
-                        Text(if (showAdvancedServer) "Sembunyikan Server" else "Pengaturan Server Lanjutan")
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                isTestingConnection = true
-                                testSuccess = null
-                                testErrorMessage = null
-                                val testAcc = EmailAccount(
-                                    id = "test",
-                                    email = emailInput.trim(),
-                                    displayName = emailInput.substringBefore("@"),
-                                    authType = AuthType.IMAP_SMTP_MANUAL,
-                                    workspaceGroupId = selectedGroupId,
-                                    colorHex = 0xFF3B82F6,
-                                    password = passwordInput,
-                                    imapHost = imapHost,
-                                    imapPort = imapPort.toIntOrNull() ?: 993,
-                                    smtpHost = smtpHost,
-                                    smtpPort = smtpPort.toIntOrNull() ?: 465,
-                                    useSsl = useSsl
-                                )
-                                val result = EmailService.testConnection(testAcc)
-                                isTestingConnection = false
-                                if (result.isSuccess) {
-                                    testSuccess = true
-                                } else {
-                                    testSuccess = false
-                                    testErrorMessage = result.exceptionOrNull()?.message ?: "Gagal terhubung"
-                                }
-                            }
-                        },
-                        enabled = emailInput.isNotBlank() && passwordInput.isNotBlank() && !isTestingConnection,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        if (isTestingConnection) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Menguji...", fontSize = 12.sp)
-                        } else {
-                            Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Tes Koneksi", fontSize = 12.sp)
-                        }
+                        Text(if (showAdvancedServer) "Sembunyikan Pengaturan Server" else "Pengaturan Server Lanjutan (Port/Host)")
                     }
                 }
 
-                // Test Connection Results
-                if (testSuccess == true) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Koneksi IMAP Berhasil! Akun siap digunakan.", color = Color(0xFF1B5E20), style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                } else if (testSuccess == false) {
+                // Error feedback if login failed
+                if (loginErrorMessage != null) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
                         shape = RoundedCornerShape(8.dp),
@@ -547,9 +485,18 @@ fun AddSingleAccountDialog(
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text("Gagal: ${testErrorMessage ?: "Periksa password / email"}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                            Text("Periksa kembali email dan kata sandi Anda. Anda juga dapat langsung menyimpan akun atau membukanya via tab Webmail.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelSmall)
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                "Gagal Terhubung: $loginErrorMessage",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Periksa kembali alamat email dan kata sandi Anda. Anda juga dapat memeriksa host/port di Pengaturan Server Lanjutan.",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.labelSmall
+                            )
                         }
                     }
                 }
@@ -568,6 +515,7 @@ fun AddSingleAccountDialog(
                                 onValueChange = { imapHost = it },
                                 label = { Text("IMAP Host") },
                                 singleLine = true,
+                                enabled = !isLoggingIn,
                                 modifier = Modifier.weight(2f)
                             )
                             OutlinedTextField(
@@ -575,6 +523,7 @@ fun AddSingleAccountDialog(
                                 onValueChange = { imapPort = it },
                                 label = { Text("Port") },
                                 singleLine = true,
+                                enabled = !isLoggingIn,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -584,6 +533,7 @@ fun AddSingleAccountDialog(
                                 onValueChange = { smtpHost = it },
                                 label = { Text("SMTP Host") },
                                 singleLine = true,
+                                enabled = !isLoggingIn,
                                 modifier = Modifier.weight(2f)
                             )
                             OutlinedTextField(
@@ -591,6 +541,7 @@ fun AddSingleAccountDialog(
                                 onValueChange = { smtpPort = it },
                                 label = { Text("Port") },
                                 singleLine = true,
+                                enabled = !isLoggingIn,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -601,15 +552,45 @@ fun AddSingleAccountDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Batal") }
+                    TextButton(onClick = onDismiss, enabled = !isLoggingIn) { Text("Batal") }
                     Spacer(modifier = Modifier.width(8.dp))
+
+                    if (loginErrorMessage != null) {
+                        OutlinedButton(
+                            onClick = {
+                                val acc = EmailAccount(
+                                    id = "acc_${System.currentTimeMillis()}",
+                                    email = emailInput.trim(),
+                                    displayName = emailInput.substringBefore("@"),
+                                    authType = AuthType.IMAP_SMTP_MANUAL,
+                                    workspaceGroupId = selectedGroupId,
+                                    colorHex = 0xFF3B82F6,
+                                    password = passwordInput,
+                                    imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
+                                    imapPort = imapPort.toIntOrNull() ?: 993,
+                                    smtpHost = smtpHost.ifBlank { "smtp.${emailInput.substringAfter("@")}" },
+                                    smtpPort = smtpPort.toIntOrNull() ?: 465,
+                                    useSsl = useSsl
+                                )
+                                onAddAccount(acc, emptyList())
+                            },
+                            enabled = !isLoggingIn
+                        ) {
+                            Text("Tetap Simpan Akun")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+
                     Button(
                         onClick = {
-                            if (emailInput.isNotBlank()) {
-                                onAddAccount(
-                                    EmailAccount(
+                            if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
+                                coroutineScope.launch {
+                                    isLoggingIn = true
+                                    loginErrorMessage = null
+                                    val acc = EmailAccount(
                                         id = "acc_${System.currentTimeMillis()}",
                                         email = emailInput.trim(),
                                         displayName = emailInput.substringBefore("@"),
@@ -623,12 +604,28 @@ fun AddSingleAccountDialog(
                                         smtpPort = smtpPort.toIntOrNull() ?: 465,
                                         useSsl = useSsl
                                     )
-                                )
+                                    val result = EmailService.loginAndFetchInbox(acc, limit = 30)
+                                    isLoggingIn = false
+                                    if (result.isSuccess) {
+                                        val (workingAcc, fetchedEmails) = result.getOrThrow()
+                                        onAddAccount(workingAcc, fetchedEmails)
+                                    } else {
+                                        loginErrorMessage = result.exceptionOrNull()?.message ?: "Gagal terhubung ke server email"
+                                    }
+                                }
                             }
                         },
-                        enabled = emailInput.isNotBlank() && passwordInput.isNotBlank()
+                        enabled = emailInput.isNotBlank() && passwordInput.isNotBlank() && !isLoggingIn
                     ) {
-                        Text("Simpan Akun")
+                        if (isLoggingIn) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Sedang Login & Membaca Inbox...")
+                        } else {
+                            Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Login & Baca Inbox")
+                        }
                     }
                 }
             }

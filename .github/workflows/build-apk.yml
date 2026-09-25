@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch: # Memungkinkan trigger manual build dari tab Actions GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,22 +20,18 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle 8.4
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
 
-      - name: Grant execute permission for gradlew
+      - name: Accept Android SDK Licenses
         run: |
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-          else
-            gradle wrapper
-            chmod +x gradlew
-          fi
+          yes | sdkmanager --licenses || true
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4

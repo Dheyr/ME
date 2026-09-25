@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -365,6 +368,7 @@ fun AddSingleAccountDialog(
     onDismiss: () -> Unit,
     onAddAccount: (EmailAccount, List<EmailMessage>) -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     var emailInput by remember { mutableStateOf("") }
@@ -432,7 +436,10 @@ fun AddSingleAccountDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Masukkan email dan kata sandi asli akun Anda. Aplikasi akan langsung terhubung ke server IMAP/SMTP dan memuat kotak masuk Anda secara otomatis.",
+                            if (emailInput.contains("gmail", ignoreCase = true))
+                                "Untuk akun Gmail: Google mewajibkan Sandi Aplikasi (16 karakter). Ketik atau tempel sandi aplikasi akun Google Anda di kolom kata sandi di bawah."
+                            else
+                                "Masukkan email dan kata sandi asli akun Anda. Aplikasi akan langsung terhubung ke server IMAP/SMTP dan memuat kotak masuk Anda secara otomatis.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -485,18 +492,28 @@ fun AddSingleAccountDialog(
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 "Gagal Terhubung: $loginErrorMessage",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold
                             )
-                            Text(
-                                "Periksa kembali alamat email dan kata sandi Anda. Anda juga dapat memeriksa host/port di Pengaturan Server Lanjutan.",
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.labelSmall
-                            )
+                            if (emailInput.contains("gmail", ignoreCase = true) || loginErrorMessage?.contains("Google") == true) {
+                                Button(
+                                    onClick = {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
+                                        context.startActivity(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }

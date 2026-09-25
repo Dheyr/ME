@@ -82,8 +82,8 @@ object EmailService {
             put("mail.store.protocol", protocol)
             put("mail.$protocol.host", account.imapHost)
             put("mail.$protocol.port", port.toString())
-            put("mail.$protocol.timeout", "10000")
-            put("mail.$protocol.connectiontimeout", "10000")
+            put("mail.$protocol.timeout", "8000")
+            put("mail.$protocol.connectiontimeout", "8000")
 
             // Enable common auth methods for real passwords
             put("mail.$protocol.auth.plain.disable", "false")
@@ -94,6 +94,7 @@ object EmailService {
 
             if (useSsl) {
                 put("mail.$protocol.ssl.enable", "true")
+                put("mail.$protocol.ssl.protocols", "TLSv1.2 TLSv1.3")
                 put("mail.$protocol.ssl.checkserveridentity", "false")
             } else {
                 put("mail.$protocol.starttls.enable", "true")
@@ -116,6 +117,10 @@ object EmailService {
 
     private fun connectToStore(account: EmailAccount): Pair<Store, EmailAccount> {
         val domain = account.email.substringAfter("@", "").lowercase().trim()
+        val isGmail = domain.contains("gmail") || account.imapHost.contains("gmail")
+        val isWellKnownSsl = isGmail || domain.contains("yahoo") || account.imapHost.contains("yahoo") ||
+                domain.contains("outlook") || account.imapHost.contains("outlook") || account.imapHost.contains("office365")
+
         val hostsToTry = if (account.imapHost.startsWith("mail.") && domain.isNotBlank()) {
             listOf(account.imapHost, "imap.$domain")
         } else {
@@ -126,27 +131,61 @@ object EmailService {
 
         for (host in hostsToTry) {
             val acc = account.copy(imapHost = host)
-            val attempts = listOf(
-                Triple(acc.imapPort, acc.useSsl, acc.email),
-                Triple(if (acc.imapPort == 993) 143 else 993, !acc.useSsl, acc.email),
-                Triple(acc.imapPort, acc.useSsl, acc.email.substringBefore("@")),
-                Triple(if (acc.imapPort == 993) 143 else 993, !acc.useSsl, acc.email.substringBefore("@"))
-            )
+            val attempts = if (isWellKnownSsl) {
+                // Well-known hosts ONLY use port 993 SSL, never port 143!
+                listOf(
+                    Triple(acc.imapPort, acc.useSsl, acc.email),
+                    Triple(acc.imapPort, acc.useSsl, acc.email.substringBefore("@"))
+                )
+            } else {
+                listOf(
+                    Triple(acc.imapPort, acc.useSsl, acc.email),
+                    Triple(if (acc.imapPort == 993) 143 else 993, !acc.useSsl, acc.email),
+                    Triple(acc.imapPort, acc.useSsl, acc.email.substringBefore("@")),
+                    Triple(if (acc.imapPort == 993) 143 else 993, !acc.useSsl, acc.email.substringBefore("@"))
+                )
+            }
 
             for ((port, ssl, user) in attempts) {
                 try {
                     val (_, store) = getImapStore(acc, port, ssl)
-                    store.connect(host, port, user, acc.password)
+                    store.connect(host, port, user, acc.password.trim())
                     if (store.isConnected) {
                         return Pair(store, acc.copy(imapPort = port, useSsl = ssl))
                     }
+                } catch (authEx: AuthenticationFailedException) {
+                    val helpfulMsg = if (isGmail) {
+                        "Kredensial ditolak oleh Google. Google mewajibkan Sandi Aplikasi (App Password 16 karakter) untuk login IMAP. Silakan buat sandi di myaccount.google.com/apppasswords lalu gunakan di sini."
+                    } else {
+                        "Kredensial ditolak oleh server ${host}. Periksa kembali email dan kata sandi Anda."
+                    }
+                    throw Exception(helpfulMsg)
                 } catch (e: Exception) {
                     lastError = e
+                    val msg = e.message ?: ""
+                    if (msg.contains("AUTHENTICATIONFAILED", ignoreCase = true) ||
+                        msg.contains("Invalid credentials", ignoreCase = true) ||
+                        msg.contains("Application-specific password", ignoreCase = true)
+                    ) {
+                        val helpfulMsg = if (isGmail) {
+                            "Kredensial ditolak oleh Google. Google mewajibkan Sandi Aplikasi (App Password 16 karakter) untuk login IMAP. Silakan buat sandi di myaccount.google.com/apppasswords lalu gunakan di sini."
+                        } else {
+                            "Autentikasi gagal: Kata sandi atau email tidak valid pada server ${host}."
+                        }
+                        throw Exception(helpfulMsg)
+                    }
                 }
             }
         }
 
-        throw lastError ?: Exception("Tidak dapat terhubung ke server IMAP dengan kredensial yang diberikan.")
+        val errMsg = lastError?.localizedMessage ?: lastError?.message ?: "Gagal terhubung ke server IMAP"
+        val userFriendlyMsg = when {
+            errMsg.contains("timeout", ignoreCase = true) -> "Koneksi ke ${account.imapHost}:${account.imapPort} waktu habis (timeout). Periksa jaringan internet Anda."
+            errMsg.contains("UnknownHost", ignoreCase = true) -> "Host server '${account.imapHost}' tidak ditemukan."
+            errMsg.contains("Connection refused", ignoreCase = true) -> "Koneksi ditolak oleh host ${account.imapHost}:${account.imapPort}."
+            else -> errMsg
+        }
+        throw Exception(userFriendlyMsg)
     }
 
     suspend fun testConnection(account: EmailAccount): Result<Boolean> = withContext(Dispatchers.IO) {

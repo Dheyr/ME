@@ -42,7 +42,9 @@ fun AccountManagementScreen(
     onDeleteAccount: (accountId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var showMethodPicker by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showWebLoginDialog by remember { mutableStateOf(false) }
     var showBulkImportDialog by remember { mutableStateOf(false) }
     var selectedGroupFilter by remember { mutableStateOf<String?>(null) }
     var selectedAccountForProxy by remember { mutableStateOf<EmailAccount?>(null) }
@@ -66,7 +68,7 @@ fun AccountManagementScreen(
                     IconButton(onClick = { showBulkImportDialog = true }) {
                         Icon(Icons.Outlined.UploadFile, contentDescription = "Import CSV", tint = MaterialTheme.colorScheme.primary)
                     }
-                    IconButton(onClick = { showAddDialog = true }) {
+                    IconButton(onClick = { showMethodPicker = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Tambah Akun", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -160,7 +162,7 @@ fun AccountManagementScreen(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
-                    TextButton(onClick = { showAddDialog = true }) {
+                    TextButton(onClick = { showMethodPicker = true }) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Tambah Akun", style = MaterialTheme.typography.labelSmall)
@@ -187,13 +189,13 @@ fun AccountManagementScreen(
                             Icon(Icons.Outlined.Email, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                             Text("Belum Ada Akun", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "Tambahkan akun email Anda (Gmail, Outlook, Yahoo, atau IMAP lainnya) untuk mulai menggunakan aplikasi.",
+                                "Tambahkan akun email Anda (Gmail, Outlook, Yahoo, atau Webmail) untuk mulai membaca kotak masuk.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Button(onClick = { showAddDialog = true }, shape = RoundedCornerShape(8.dp)) {
+                            Button(onClick = { showMethodPicker = true }, shape = RoundedCornerShape(8.dp)) {
                                 Text("Tambah Akun Pertama")
                             }
                         }
@@ -211,11 +213,46 @@ fun AccountManagementScreen(
         }
     }
 
-    // Add Single Account Dialog
+    // Method Selection Dialog (Web Login vs Manual IMAP vs Bulk)
+    if (showMethodPicker) {
+        MethodPickerDialog(
+            onDismiss = { showMethodPicker = false },
+            onSelectWebLogin = {
+                showMethodPicker = false
+                showWebLoginDialog = true
+            },
+            onSelectManualImap = {
+                showMethodPicker = false
+                showAddDialog = true
+            },
+            onSelectBulkImport = {
+                showMethodPicker = false
+                showBulkImportDialog = true
+            }
+        )
+    }
+
+    // Web Login Dialog (Full Screen in-app web login)
+    if (showWebLoginDialog) {
+        WebLoginDialog(
+            groups = groups,
+            onDismiss = { showWebLoginDialog = false },
+            onAccountAttached = { newAcc, fetchedEmails ->
+                onAddSingleAccount(newAcc, fetchedEmails)
+                showWebLoginDialog = false
+            }
+        )
+    }
+
+    // Add Single Account Dialog (Manual IMAP/SMTP)
     if (showAddDialog) {
         AddSingleAccountDialog(
             groups = groups,
             onDismiss = { showAddDialog = false },
+            onSwitchToWebLogin = {
+                showAddDialog = false
+                showWebLoginDialog = true
+            },
             onAddAccount = { acc, fetchedEmails ->
                 onAddSingleAccount(acc, fetchedEmails)
                 showAddDialog = false
@@ -283,12 +320,21 @@ fun AccountCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(
-                        text = "IMAP: ${account.imapHost}:${account.imapPort} | SMTP: ${account.smtpHost}:${account.smtpPort}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        fontSize = 11.sp
-                    )
+                    if (account.authType == AuthType.WEB_SESSION) {
+                        Text(
+                            text = "Web Session • ${account.webLoginUrl ?: "Webmail / Cloud"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp
+                        )
+                    } else {
+                        Text(
+                            text = "IMAP: ${account.imapHost}:${account.imapPort} | SMTP: ${account.smtpHost}:${account.smtpPort}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            fontSize = 11.sp
+                        )
+                    }
                 }
 
                 StatusIndicator(status = account.status)
@@ -317,15 +363,31 @@ fun AccountCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AssistChip(
-                        onClick = { },
-                        label = {
-                            Text(
-                                "IMAP/SMTP (${if (account.useSsl) "SSL" else "TLS"})",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    )
+                    if (account.authType == AuthType.WEB_SESSION) {
+                        AssistChip(
+                            onClick = { },
+                            leadingIcon = {
+                                Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            },
+                            label = {
+                                Text(
+                                    "Web Session (Aktif)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        )
+                    } else {
+                        AssistChip(
+                            onClick = { },
+                            label = {
+                                Text(
+                                    "IMAP/SMTP (${if (account.useSsl) "SSL" else "TLS"})",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        )
+                    }
                     if (account.unreadCount > 0) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -366,6 +428,7 @@ fun AccountCard(
 fun AddSingleAccountDialog(
     groups: List<WorkspaceGroup>,
     onDismiss: () -> Unit,
+    onSwitchToWebLogin: (() -> Unit)? = null,
     onAddAccount: (EmailAccount, List<EmailMessage>) -> Unit
 ) {
     val context = LocalContext.current
@@ -409,13 +472,25 @@ fun AddSingleAccountDialog(
                     .padding(20.dp)
                     .fillMaxWidth()
             ) {
-                Text("Login Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Login Akun Email (Manual)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Masuk langsung dengan kata sandi asli akun email Anda",
+                    "Masuk langsung dengan host IMAP & kata sandi akun email Anda",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(14.dp))
+                if (onSwitchToWebLogin != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onSwitchToWebLogin,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Atau Login via Web (Sandi Asli & 2FA)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Helpful Info Tip
                 Card(
@@ -499,13 +574,24 @@ fun AddSingleAccountDialog(
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold
                             )
-                            if (emailInput.contains("gmail", ignoreCase = true) || loginErrorMessage?.contains("Google") == true) {
+                            if (onSwitchToWebLogin != null) {
                                 Button(
+                                    onClick = onSwitchToWebLogin,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Beralih: Login via Web (Sandi Asli & 2FA)", fontSize = 12.sp)
+                                }
+                            }
+                            if (emailInput.contains("gmail", ignoreCase = true) || loginErrorMessage?.contains("Google") == true) {
+                                OutlinedButton(
                                     onClick = {
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
                                         context.startActivity(intent)
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -881,3 +967,166 @@ fun ProxyConfigDialog(
         }
     }
 }
+
+@Composable
+fun MethodPickerDialog(
+    onDismiss: () -> Unit,
+    onSelectWebLogin: () -> Unit,
+    onSelectManualImap: () -> Unit,
+    onSelectBulkImport: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Pilih Cara Hubungkan Email", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Pilih metode yang Anda inginkan untuk menambahkan akun",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Option 1: Web Login (Recommended)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectWebLogin() },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Login via Web Browser", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        "REKOMENDASI",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                "Masuk dengan Sandi Asli & 2FA langsung di situs web Gmail, Outlook, Yahoo, atau Webmail. Akun otomatis menempel di aplikasi!",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                // Option 2: Manual IMAP/SMTP
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectManualImap() },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(22.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Login Manual IMAP / SMTP", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                "Koneksi protokol IMAP/SMTP langsung dengan host/port dan kata sandi/sandi aplikasi.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                // Option 3: Bulk Import CSV
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectBulkImport() },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Outlined.UploadFile, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(22.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Impor CSV / Daftar Massal", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                "Tambah puluhan akun sekaligus dari teks atau file spreadsheet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Tutup")
+            }
+        }
+    )
+}
+

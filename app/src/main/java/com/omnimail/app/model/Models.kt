@@ -3,6 +3,7 @@ package com.omnimail.app.model
 enum class AuthType {
     OAUTH_GOOGLE,
     OAUTH_MICROSOFT,
+    WEB_SESSION,
     IMAP_SMTP_MANUAL
 }
 
@@ -78,7 +79,9 @@ data class EmailAccount(
     val smtpHost: String = "smtp.provider.com",
     val smtpPort: Int = 465,
     val password: String = "",
-    val useSsl: Boolean = true
+    val useSsl: Boolean = true,
+    val webLoginUrl: String? = null,
+    val webCookies: String? = null
 )
 
 data class WorkspaceGroup(

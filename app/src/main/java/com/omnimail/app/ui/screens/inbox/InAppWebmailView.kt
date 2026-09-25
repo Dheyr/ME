@@ -41,13 +41,14 @@ fun InAppWebmailView(
     var currentUrl by remember { mutableStateOf("") }
     var pageTitle by remember { mutableStateOf("") }
 
-    val defaultUrl = remember(account.id, account.webLoginUrl) {
+    val defaultUrl: String = remember(account.id, account.webLoginUrl) {
+        val webUrl = account.webLoginUrl.orEmpty()
         when {
-            account.webLoginUrl.isNotBlank() && account.webLoginUrl.contains("mail.google.com") -> account.webLoginUrl
+            webUrl.isNotBlank() && webUrl.contains("mail.google.com") -> webUrl
             account.email.contains("gmail.com") || account.email.endsWith(".ac.id") || account.email.endsWith(".edu") -> "https://mail.google.com/mail/u/0/"
             account.email.contains("outlook.com") || account.email.contains("hotmail.com") -> "https://outlook.live.com/mail/"
             account.email.contains("yahoo.com") -> "https://mail.yahoo.com"
-            account.webLoginUrl.isNotBlank() -> account.webLoginUrl
+            webUrl.isNotBlank() -> webUrl
             else -> "https://mail.google.com/mail/u/0/"
         }
     }

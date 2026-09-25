@@ -114,8 +114,8 @@ object EmailService {
             put("mail.store.protocol", protocol)
             put("mail.$protocol.host", account.imapHost)
             put("mail.$protocol.port", port.toString())
-            put("mail.$protocol.timeout", "8000")
-            put("mail.$protocol.connectiontimeout", "8000")
+            put("mail.$protocol.timeout", "25000")
+            put("mail.$protocol.connectiontimeout", "15000")
 
             // Enable common auth methods for real passwords
             put("mail.$protocol.auth.plain.disable", "false")
@@ -154,6 +154,12 @@ object EmailService {
         val isWellKnownSsl = isGmail || domain.contains("yahoo") || account.imapHost.contains("yahoo") ||
                 domain.contains("outlook") || account.imapHost.contains("outlook") || account.imapHost.contains("office365")
 
+        // Auto-clean password: strip internal spaces if user pasted 'abcd efgh ijkl mnop' Google App Password
+        val cleanPassword = if (isGmail) account.password.replace(" ", "").trim() else account.password.trim()
+        if (cleanPassword.isBlank()) {
+            throw Exception("Sandi Aplikasi IMAP belum diatur untuk akun ${account.email}. Masukkan Sandi Aplikasi agar kotak masuk native dapat diperbarui.")
+        }
+
         val hostsToTry = if (account.imapHost.startsWith("mail.") && domain.isNotBlank()) {
             listOf(account.imapHost, "imap.$domain")
         } else {
@@ -163,7 +169,7 @@ object EmailService {
         var lastError: Exception? = null
 
         for (host in hostsToTry) {
-            val acc = account.copy(imapHost = host)
+            val acc = account.copy(imapHost = host, password = cleanPassword)
             val attempts = if (isWellKnownSsl) {
                 // Well-known hosts ONLY use port 993 SSL, never port 143!
                 listOf(
@@ -182,7 +188,7 @@ object EmailService {
             for ((port, ssl, user) in attempts) {
                 try {
                     val (_, store) = getImapStore(acc, port, ssl)
-                    store.connect(host, port, user, acc.password.trim())
+                    store.connect(host, port, user, cleanPassword)
                     if (store.isConnected) {
                         return Pair(store, acc.copy(imapPort = port, useSsl = ssl))
                     }
@@ -255,6 +261,15 @@ object EmailService {
             val start = (totalMessages - limit + 1).coerceAtLeast(1)
             val messages = folder.getMessages(start, totalMessages)
 
+            // Efficiently prefetch ENVELOPE, FLAGS, and UID in a single batch
+            val uidFolder = folder as? UIDFolder
+            val fp = FetchProfile().apply {
+                add(FetchProfile.Item.ENVELOPE)
+                add(FetchProfile.Item.FLAGS)
+                add(UIDFolder.FetchProfileItem.UID)
+            }
+            folder.fetch(messages, fp)
+
             val dateFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
             val dateLongFormat = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
 
@@ -284,10 +299,14 @@ object EmailService {
                 val isRead = msg.isSet(Flags.Flag.SEEN)
                 val isStarred = msg.isSet(Flags.Flag.FLAGGED)
 
+                val hasAttachments = checkForAttachments(msg)
                 val bodyText = extractText(msg)
                 val snippet = bodyText.take(160).replace("\n", " ").trim()
 
-                val emailId = "${workingAccount.id}_${msg.messageNumber}_${sentDate.time}"
+                // Stable UID-based ID prevents duplication or lost messages on sync
+                val uid = uidFolder?.getUID(msg) ?: (sentDate.time xor msg.messageNumber.toLong())
+                val messageId = (msg as? MimeMessage)?.messageID?.trim('<', '>') ?: "${uid}_${sentDate.time}"
+                val emailId = "${workingAccount.id}_${uid}_${messageId.hashCode()}"
 
                 emailList.add(
                     EmailMessage(
@@ -305,7 +324,7 @@ object EmailService {
                         formattedTime = formattedTime,
                         isRead = isRead,
                         isStarred = isStarred,
-                        hasAttachments = false,
+                        hasAttachments = hasAttachments,
                         folder = EmailFolder.INBOX,
                         threadId = emailId
                     )
@@ -342,6 +361,9 @@ object EmailService {
             Pair(if (fromAccount.smtpPort == 465) 587 else 465, fromAccount.smtpPort != 465)
         )
 
+        val isGmail = fromAccount.email.contains("gmail") || fromAccount.email.contains("google") || fromAccount.smtpHost.contains("gmail")
+        val cleanPassword = if (isGmail) fromAccount.password.replace(" ", "").trim() else fromAccount.password.trim()
+
         var lastError: Exception? = null
 
         for ((port, ssl) in attempts) {
@@ -351,7 +373,7 @@ object EmailService {
                     put("mail.$protocol.auth", "true")
                     put("mail.$protocol.host", fromAccount.smtpHost)
                     put("mail.$protocol.port", port.toString())
-                    put("mail.$protocol.timeout", "15000")
+                    put("mail.$protocol.timeout", "20000")
                     put("mail.$protocol.connectiontimeout", "15000")
                     put("mail.$protocol.auth.plain.disable", "false")
                     put("mail.$protocol.auth.login.disable", "false")
@@ -377,7 +399,7 @@ object EmailService {
 
                 val session = Session.getInstance(props, object : Authenticator() {
                     override fun getPasswordAuthentication(): PasswordAuthentication {
-                        return PasswordAuthentication(fromAccount.email, fromAccount.password)
+                        return PasswordAuthentication(fromAccount.email, cleanPassword)
                     }
                 })
 
@@ -409,35 +431,60 @@ object EmailService {
         Result.failure(Exception(lastError?.localizedMessage ?: lastError?.message ?: "Gagal mengirim email via SMTP"))
     }
 
-    private fun extractText(part: Part): String {
+    private fun checkForAttachments(part: Part, depth: Int = 0): Boolean {
+        if (depth > 4) return false
         return try {
+            val disp = part.disposition
+            if (Part.ATTACHMENT.equals(disp, ignoreCase = true) || !part.fileName.isNullOrBlank()) {
+                return true
+            }
+            if (part.isMimeType("multipart/*")) {
+                val mp = part.content as? MimeMultipart ?: return false
+                for (i in 0 until mp.count) {
+                    if (checkForAttachments(mp.getBodyPart(i), depth + 1)) return true
+                }
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun extractText(part: Part, depth: Int = 0): String {
+        if (depth > 4) return ""
+        return try {
+            if (Part.ATTACHMENT.equals(part.disposition, ignoreCase = true)) {
+                return ""
+            }
             if (part.isMimeType("text/plain")) {
-                part.content?.toString() ?: ""
+                (part.content?.toString() ?: "").take(2500)
             } else if (part.isMimeType("text/html")) {
                 val html = part.content?.toString() ?: ""
-                Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+                Html.fromHtml(html.take(6000), Html.FROM_HTML_MODE_LEGACY).toString().trim().take(2500)
             } else if (part.isMimeType("multipart/*")) {
                 val multipart = part.content as? MimeMultipart ?: return ""
                 val count = multipart.count
                 var plainText = ""
                 var htmlText = ""
-                for (i in 0 until count) {
+                for (i in 0 until count.coerceAtMost(6)) {
                     val bodyPart = multipart.getBodyPart(i)
+                    if (Part.ATTACHMENT.equals(bodyPart.disposition, ignoreCase = true)) continue
                     if (bodyPart.isMimeType("text/plain")) {
                         plainText = bodyPart.content?.toString() ?: ""
+                        if (plainText.isNotBlank()) return plainText.take(2500)
                     } else if (bodyPart.isMimeType("text/html")) {
                         val h = bodyPart.content?.toString() ?: ""
-                        htmlText = Html.fromHtml(h, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+                        htmlText = Html.fromHtml(h.take(6000), Html.FROM_HTML_MODE_LEGACY).toString().trim()
                     } else if (bodyPart.isMimeType("multipart/*")) {
-                        val nested = extractText(bodyPart)
+                        val nested = extractText(bodyPart, depth + 1)
                         if (nested.isNotBlank()) return nested
                     }
                 }
-                plainText.ifBlank { htmlText }
+                plainText.ifBlank { htmlText }.take(2500)
             } else {
-                part.content?.toString() ?: ""
+                ""
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             ""
         }
     }

@@ -86,24 +86,34 @@ fun OmniMailApp() {
                     var totalNew = 0
                     val allFetched = mutableListOf<EmailMessage>()
                     val updatedAccounts = accounts.toMutableList()
+                    var lastErrorMsg: String? = null
+                    var errorCount = 0
 
                     for ((idx, acc) in accounts.withIndex()) {
-                        val res = EmailService.fetchInboxEmails(acc, limit = 25)
+                        if (acc.password.isBlank()) {
+                            // Account is in Webmail mode only, skip IMAP
+                            continue
+                        }
+                        val res = EmailService.fetchInboxEmails(acc, limit = 30)
                         if (res.isSuccess) {
                             val fetched = res.getOrDefault(emptyList())
                             allFetched.addAll(fetched)
                             val unread = fetched.count { !it.isRead }
                             updatedAccounts[idx] = acc.copy(unreadCount = unread, status = AccountStatus.ONLINE)
                         } else {
+                            val err = res.exceptionOrNull()?.message ?: "Gagal terhubung"
+                            lastErrorMsg = "${acc.email.substringBefore("@")}: $err"
+                            errorCount++
                             updatedAccounts[idx] = acc.copy(status = AccountStatus.ERROR)
                         }
                     }
 
                     if (allFetched.isNotEmpty()) {
                         val existingIds = emails.map { it.id }.toSet()
-                        val newlyAdded = allFetched.filter { it.id !in existingIds }
-                        totalNew = newlyAdded.size
-                        val merged = (newlyAdded + emails).sortedByDescending { it.timestamp }
+                        totalNew = allFetched.count { it.id !in existingIds }
+                        val fetchedMap = allFetched.associateBy { it.id }
+                        val remaining = emails.filter { it.id !in fetchedMap }
+                        val merged = (allFetched + remaining).sortedByDescending { it.timestamp }
                         emails = merged
                         OmniStorage.saveEmails(context, merged)
                     }
@@ -111,9 +121,20 @@ fun OmniMailApp() {
                     OmniStorage.saveAccounts(context, updatedAccounts)
 
                     isManualSyncing = false
-                    snackbarHostState.showSnackbar(
-                        if (totalNew > 0) "$totalNew email baru berhasil ditarik!" else "Kotak masuk sudah diperbarui."
-                    )
+                    when {
+                        errorCount > 0 && totalNew > 0 -> {
+                            snackbarHostState.showSnackbar("$totalNew email baru masuk! Peringatan: $lastErrorMsg")
+                        }
+                        errorCount > 0 && allFetched.isEmpty() -> {
+                            snackbarHostState.showSnackbar("Gagal sync: $lastErrorMsg")
+                        }
+                        totalNew > 0 -> {
+                            snackbarHostState.showSnackbar("$totalNew email baru berhasil ditarik!")
+                        }
+                        else -> {
+                            snackbarHostState.showSnackbar("Kotak masuk sudah mutakhir.")
+                        }
+                    }
                 }
             }
         }
@@ -359,7 +380,16 @@ fun OmniMailApp() {
                                             OmniStorage.saveEmails(context, updated)
                                         },
                                         onNavigateToAccounts = { currentTab = NavigationTab.ACCOUNTS },
-                                        onManualSync = { syncAllAccounts() }
+                                        onManualSync = { syncAllAccounts() },
+                                        onEditAccountPassword = { updatedAcc ->
+                                            val updated = accounts.map { if (it.id == updatedAcc.id) updatedAcc else it }
+                                            accounts = updated
+                                            OmniStorage.saveAccounts(context, updated)
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Sandi akun ${updatedAcc.email} diperbarui! Menyinkronkan...")
+                                                syncAllAccounts()
+                                            }
+                                        }
                                     )
                                 }
                                 NavigationTab.SEARCH -> {
@@ -413,6 +443,19 @@ fun OmniMailApp() {
                                             }
                                             accounts = updated
                                             OmniStorage.saveAccounts(context, updated)
+                                        },
+                                        onUpdateAccountPasswords = { accId, appPass, origPass ->
+                                            val updated = accounts.map {
+                                                if (it.id == accId) it.copy(password = appPass, originalPassword = origPass) else it
+                                            }
+                                            accounts = updated
+                                            OmniStorage.saveAccounts(context, updated)
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Sandi akun berhasil diperbarui!")
+                                                if (appPass.isNotBlank()) {
+                                                    syncAllAccounts()
+                                                }
+                                            }
                                         },
                                         onDeleteAccount = { accId ->
                                             val deleted = accounts.find { it.id == accId }

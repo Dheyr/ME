@@ -37,12 +37,14 @@ fun AccountManagementScreen(
     onAddSingleAccount: (EmailAccount, List<EmailMessage>) -> Unit,
     onUpdateAccountProxy: (accountId: String, ProxyConfig?) -> Unit,
     onDeleteAccount: (accountId: String) -> Unit = {},
+    onUpdateAccountPasswords: (accountId: String, appPassword: String, originalPassword: String) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var showMethodPicker by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showWebLoginDialog by remember { mutableStateOf(false) }
     var selectedAccountForProxy by remember { mutableStateOf<EmailAccount?>(null) }
+    var selectedAccountForPasswords by remember { mutableStateOf<EmailAccount?>(null) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -51,7 +53,7 @@ fun AccountManagementScreen(
                 title = {
                     Column {
                         Text("Kelola Akun Email (${accounts.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("Bisa login banyak akun & sinkronisasi inbox", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Sandi asli & sandi aplikasi digabung dalam satu akun", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 actions = {
@@ -111,7 +113,7 @@ fun AccountManagementScreen(
                             Icon(Icons.Outlined.Email, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                             Text("Belum Ada Akun Terhubung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "Tambahkan akun email Anda (Gmail, Google Workspace kampus, Outlook, Yahoo, atau Webmail) untuk mulai membaca inbox dan berkirim pesan.",
+                                "Tambahkan akun email Anda (Gmail, Google Workspace kampus, Outlook, Yahoo, atau Webmail). Bisa login banyak akun sekaligus!",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -128,6 +130,7 @@ fun AccountManagementScreen(
                     AccountCard(
                         account = account,
                         onConfigureProxy = { selectedAccountForProxy = account },
+                        onEditPasswords = { selectedAccountForPasswords = account },
                         onDeleteAccount = { onDeleteAccount(account.id) }
                     )
                 }
@@ -161,7 +164,7 @@ fun AccountManagementScreen(
         )
     }
 
-    // Add Single Account Dialog (Manual IMAP/SMTP)
+    // Add Single Account Dialog (Manual IMAP/SMTP with unified passwords)
     if (showAddDialog) {
         AddSingleAccountDialog(
             onDismiss = { showAddDialog = false },
@@ -187,12 +190,25 @@ fun AccountManagementScreen(
             }
         )
     }
+
+    // Edit Passwords Dialog (Unified Sandi Asli & Sandi Aplikasi)
+    selectedAccountForPasswords?.let { account ->
+        EditAccountPasswordsDialog(
+            account = account,
+            onDismiss = { selectedAccountForPasswords = null },
+            onSave = { appPass, origPass ->
+                onUpdateAccountPasswords(account.id, appPass, origPass)
+                selectedAccountForPasswords = null
+            }
+        )
+    }
 }
 
 @Composable
 fun AccountCard(
     account: EmailAccount,
     onConfigureProxy: () -> Unit,
+    onEditPasswords: () -> Unit,
     onDeleteAccount: () -> Unit
 ) {
     Card(
@@ -224,21 +240,12 @@ fun AccountCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (account.authType == AuthType.WEB_SESSION) {
-                        Text(
-                            text = "Web Session • ${account.imapHost}:${account.imapPort}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 11.sp
-                        )
-                    } else {
-                        Text(
-                            text = "IMAP: ${account.imapHost}:${account.imapPort} | SMTP: ${account.smtpHost}:${account.smtpPort}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            fontSize = 11.sp
-                        )
-                    }
+                    Text(
+                        text = "IMAP: ${account.imapHost}:${account.imapPort} | SMTP: ${account.smtpHost}:${account.smtpPort}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        fontSize = 11.sp
+                    )
                 }
 
                 StatusIndicator(status = account.status)
@@ -257,7 +264,7 @@ fun AccountCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Protocol & Proxy Info
+            // Protocol & Credentials Status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -267,38 +274,58 @@ fun AccountCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (account.authType == AuthType.WEB_SESSION) {
+                    if (account.password.isNotBlank()) {
                         AssistChip(
-                            onClick = { },
+                            onClick = onEditPasswords,
                             leadingIcon = {
-                                Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF2E7D32))
                             },
                             label = {
                                 Text(
-                                    "Web Session",
+                                    "IMAP Native Aktif",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = Color(0xFF2E7D32)
                                 )
                             }
                         )
                     } else {
                         AssistChip(
-                            onClick = { },
+                            onClick = onEditPasswords,
+                            leadingIcon = {
+                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFFB45309))
+                            },
                             label = {
                                 Text(
-                                    "IMAP/SMTP (${if (account.useSsl) "SSL" else "TLS"})",
-                                    style = MaterialTheme.typography.labelSmall
+                                    "+ Sandi Aplikasi IMAP",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFB45309),
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         )
                     }
+
+                    AssistChip(
+                        onClick = onEditPasswords,
+                        leadingIcon = {
+                            Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        },
+                        label = {
+                            Text(
+                                "Webmail",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+
                     if (account.unreadCount > 0) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                         ) {
                             Text(
-                                "${account.unreadCount} belum dibaca",
+                                "${account.unreadCount} baru",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
@@ -329,6 +356,95 @@ fun AccountCard(
 }
 
 @Composable
+fun EditAccountPasswordsDialog(
+    account: EmailAccount,
+    onDismiss: () -> Unit,
+    onSave: (appPassword: String, originalPassword: String) -> Unit
+) {
+    val context = LocalContext.current
+    var appPassword by remember { mutableStateOf(account.password) }
+    var originalPassword by remember { mutableStateOf(account.originalPassword) }
+    val isGoogle = remember(account.email, account.imapHost) {
+        account.email.contains("gmail") || account.email.contains("google") ||
+        account.email.endsWith(".ac.id") || account.email.endsWith(".edu") ||
+        account.imapHost.contains("gmail")
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Kelola Sandi Akun", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    account.email,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Text(
+                    "Sandi Asli (Webmail) dan Sandi Aplikasi (IMAP Native) digabung dalam akun ini.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = appPassword,
+                    onValueChange = { appPassword = it },
+                    label = { Text(if (isGoogle) "Sandi Aplikasi IMAP (16 Karakter)" else "Kata Sandi Email (IMAP)") },
+                    placeholder = { Text("Untuk sync inbox & kirim email native") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (isGoogle) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
+                                context.startActivity(intent)
+                            },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = originalPassword,
+                    onValueChange = { originalPassword = it },
+                    label = { Text("Sandi Asli (Webmail & 2FA)") },
+                    placeholder = { Text("Opsional") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Batal") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onSave(appPassword.trim(), originalPassword.trim()) }) {
+                        Text("Simpan Sandi")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun AddSingleAccountDialog(
     onDismiss: () -> Unit,
     onSwitchToWebLogin: (() -> Unit)? = null,
@@ -339,6 +455,7 @@ fun AddSingleAccountDialog(
 
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
+    var originalPasswordInput by remember { mutableStateOf("") }
 
     var imapHost by remember { mutableStateOf("") }
     var imapPort by remember { mutableStateOf("993") }
@@ -392,9 +509,9 @@ fun AddSingleAccountDialog(
                     .padding(20.dp)
                     .fillMaxWidth()
             ) {
-                Text("Login Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Tambah Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Masuk langsung dengan email & kata sandi akun Anda",
+                    "Sandi Asli & Sandi Aplikasi kini digabung dalam satu akun",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -407,7 +524,7 @@ fun AddSingleAccountDialog(
                     ) {
                         Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Atau Login via Web Browser (Sandi Asli & 2FA)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Atau Login Cepat via Web Browser", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -432,9 +549,9 @@ fun AddSingleAccountDialog(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             if (isGoogleDomain)
-                                "Akun Google Workspace / Gmail: Google mewajibkan Sandi Aplikasi (App Password 16 karakter) untuk akses IMAP/SMTP native. Masukkan Sandi Aplikasi Anda di bawah."
+                                "Akun Google: Masukkan Sandi Aplikasi (16 karakter) agar inbox native bisa memperbarui email. Masukkan juga Sandi Asli jika ingin membuka webmail."
                             else
-                                "Masukkan email dan kata sandi asli akun Anda. Aplikasi akan langsung terhubung ke server IMAP/SMTP dan memuat kotak masuk Anda secara otomatis.",
+                                "Masukkan email dan kata sandi akun Anda. Kotak masuk native dan webmail akan terhubung secara otomatis.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -458,14 +575,44 @@ fun AddSingleAccountDialog(
                 OutlinedTextField(
                     value = passwordInput,
                     onValueChange = { passwordInput = it; loginErrorMessage = null },
-                    label = { Text(if (isGoogleDomain) "Sandi Aplikasi (16 Karakter) / Sandi Asli" else "Kata Sandi Email") },
+                    label = { Text(if (isGoogleDomain) "Sandi Aplikasi IMAP (16 Karakter)" else "Kata Sandi Email") },
+                    placeholder = { Text(if (isGoogleDomain) "16 karakter dari Google" else "Kata sandi email") },
+                    singleLine = true,
+                    enabled = !isLoggingIn,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = originalPasswordInput,
+                    onValueChange = { originalPasswordInput = it },
+                    label = { Text("Sandi Asli (Webmail & 2FA - Opsional)") },
+                    placeholder = { Text("Untuk login webmail") },
                     singleLine = true,
                     enabled = !isLoggingIn,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                if (isGoogleDomain) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
+                                context.startActivity(intent)
+                            },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 11.sp)
+                        }
+                    }
+                }
 
                 // Toggle advanced settings
                 Row(
@@ -504,20 +651,6 @@ fun AddSingleAccountDialog(
                                     Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Beralih: Login via Web (Sandi Asli & 2FA)", fontSize = 12.sp)
-                                }
-                            }
-                            if (isGoogleDomain) {
-                                OutlinedButton(
-                                    onClick = {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
-                                        context.startActivity(intent)
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 12.sp)
                                 }
                             }
                         }
@@ -584,18 +717,24 @@ fun AddSingleAccountDialog(
                     if (loginErrorMessage != null) {
                         OutlinedButton(
                             onClick = {
+                                val targetMailUrl = if (emailInput.contains("gmail") || emailInput.contains("google") || emailInput.endsWith(".ac.id") || emailInput.endsWith(".edu")) {
+                                    "https://mail.google.com/mail/u/?authuser=${emailInput.trim()}"
+                                } else "https://mail.google.com/mail/u/0/"
+
                                 val acc = EmailAccount(
                                     id = "acc_${System.currentTimeMillis()}",
                                     email = emailInput.trim(),
                                     displayName = emailInput.substringBefore("@"),
                                     authType = AuthType.IMAP_SMTP_MANUAL,
                                     colorHex = 0xFF3B82F6,
-                                    password = passwordInput,
+                                    password = passwordInput.trim(),
+                                    originalPassword = originalPasswordInput.trim(),
                                     imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
                                     imapPort = imapPort.toIntOrNull() ?: 993,
                                     smtpHost = smtpHost.ifBlank { "smtp.${emailInput.substringAfter("@")}" },
                                     smtpPort = smtpPort.toIntOrNull() ?: 465,
-                                    useSsl = useSsl
+                                    useSsl = useSsl,
+                                    webLoginUrl = targetMailUrl
                                 )
                                 onAddAccount(acc, emptyList())
                             },
@@ -612,18 +751,24 @@ fun AddSingleAccountDialog(
                                 coroutineScope.launch {
                                     isLoggingIn = true
                                     loginErrorMessage = null
+                                    val targetMailUrl = if (emailInput.contains("gmail") || emailInput.contains("google") || emailInput.endsWith(".ac.id") || emailInput.endsWith(".edu")) {
+                                        "https://mail.google.com/mail/u/?authuser=${emailInput.trim()}"
+                                    } else "https://mail.google.com/mail/u/0/"
+
                                     val acc = EmailAccount(
                                         id = "acc_${System.currentTimeMillis()}",
                                         email = emailInput.trim(),
                                         displayName = emailInput.substringBefore("@"),
                                         authType = AuthType.IMAP_SMTP_MANUAL,
                                         colorHex = 0xFF3B82F6,
-                                        password = passwordInput,
+                                        password = passwordInput.trim(),
+                                        originalPassword = originalPasswordInput.trim(),
                                         imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
                                         imapPort = imapPort.toIntOrNull() ?: 993,
                                         smtpHost = smtpHost.ifBlank { "smtp.${emailInput.substringAfter("@")}" },
                                         smtpPort = smtpPort.toIntOrNull() ?: 465,
-                                        useSsl = useSsl
+                                        useSsl = useSsl,
+                                        webLoginUrl = targetMailUrl
                                     )
                                     val result = EmailService.loginAndFetchInbox(acc, limit = 30)
                                     isLoggingIn = false
@@ -658,7 +803,7 @@ fun AddSingleAccountDialog(
 fun ProxyConfigDialog(
     account: EmailAccount,
     onDismiss: () -> Unit,
-    onSaveProxy: (ProxyConfig?) -> Unit
+    onSave: (ProxyConfig?) -> Unit
 ) {
     var isProxyEnabled by remember { mutableStateOf(account.proxyConfig?.enabled ?: false) }
     var proxyType by remember { mutableStateOf(account.proxyConfig?.type ?: ProxyType.SOCKS5) }
@@ -792,7 +937,7 @@ fun MethodPickerDialog(
             Column {
                 Text("Pilih Cara Hubungkan Email", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "Pilih metode yang Anda inginkan untuk menambahkan akun",
+                    "Sandi Asli & Sandi Aplikasi tersimpan bersama dalam satu akun",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -803,7 +948,7 @@ fun MethodPickerDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Option 1: Web Login (Recommended)
+                // Option 1: Web Login (Multi-Account Supported)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -830,7 +975,7 @@ fun MethodPickerDialog(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Login via Web Browser", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                Text("Login Web Browser (Banyak Akun)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
                                     color = MaterialTheme.colorScheme.primary,
@@ -848,7 +993,7 @@ fun MethodPickerDialog(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                "Masuk dengan Sandi Asli & 2FA langsung di situs web Gmail, Outlook, Yahoo, atau Webmail. Akun otomatis menempel di aplikasi!",
+                                "Masuk dengan Sandi Asli & 2FA langsung di situs web Gmail, Outlook, Yahoo, atau Webmail. Bisa tambah banyak akun Gmail sekaligus!",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp
@@ -885,7 +1030,7 @@ fun MethodPickerDialog(
                             Text("Login Manual IMAP / SMTP", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                "Koneksi protokol IMAP/SMTP dengan auto-detect server & sandi aplikasi.",
+                                "Koneksi protokol IMAP native dengan Sandi Aplikasi & Sandi Asli tergabung.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp

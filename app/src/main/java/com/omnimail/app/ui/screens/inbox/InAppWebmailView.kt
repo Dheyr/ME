@@ -41,15 +41,23 @@ fun InAppWebmailView(
     var currentUrl by remember { mutableStateOf("") }
     var pageTitle by remember { mutableStateOf("") }
 
-    val defaultUrl: String = remember(account.id, account.webLoginUrl) {
+    val isGoogle = remember(account.email, account.imapHost) {
+        account.email.contains("gmail") || account.email.contains("google") ||
+        account.email.endsWith(".ac.id") || account.email.endsWith(".edu") ||
+        account.imapHost.contains("gmail")
+    }
+
+    // Isolate by account email using Google authuser query parameter
+    val defaultUrl: String = remember(account.id, account.webLoginUrl, account.email) {
         val webUrl = account.webLoginUrl.orEmpty()
         when {
-            webUrl.isNotBlank() && webUrl.contains("mail.google.com") -> webUrl
-            account.email.contains("gmail.com") || account.email.endsWith(".ac.id") || account.email.endsWith(".edu") -> "https://mail.google.com/mail/u/0/"
+            isGoogle || webUrl.contains("mail.google.com") -> {
+                "https://mail.google.com/mail/u/?authuser=${account.email}"
+            }
             account.email.contains("outlook.com") || account.email.contains("hotmail.com") -> "https://outlook.live.com/mail/"
             account.email.contains("yahoo.com") -> "https://mail.yahoo.com"
             webUrl.isNotBlank() -> webUrl
-            else -> "https://mail.google.com/mail/u/0/"
+            else -> "https://mail.google.com/mail/u/?authuser=${account.email}"
         }
     }
 
@@ -76,7 +84,7 @@ fun InAppWebmailView(
                         onClick = onBackToUnified,
                         modifier = Modifier.size(36.dp)
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Kembali ke Semua Akun")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Kembali ke Kotak Masuk")
                     }
 
                     Spacer(modifier = Modifier.width(4.dp))
@@ -104,7 +112,7 @@ fun InAppWebmailView(
                                 color = Color(0xFFE8F5E9)
                             ) {
                                 Text(
-                                    text = "Sandi Asli Aktif",
+                                    text = "Webmail Aktif",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xFF2E7D32),
                                     fontSize = 10.sp,
@@ -122,6 +130,23 @@ fun InAppWebmailView(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
+                        }
+                    }
+
+                    // Button: Switch Account in Google Web Session
+                    if (isGoogle) {
+                        IconButton(
+                            onClick = {
+                                val chooserUrl = "https://accounts.google.com/AccountChooser?Email=${account.email}&service=mail&continue=https://mail.google.com/mail/u/?authuser=${account.email}"
+                                webViewInstance?.loadUrl(chooserUrl)
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.SwitchAccount,
+                                contentDescription = "Pilih Akun Google",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
@@ -168,7 +193,7 @@ fun InAppWebmailView(
                     IconButton(
                         onClick = {
                             val composeUrl = if (defaultUrl.contains("mail.google.com")) {
-                                "https://mail.google.com/mail/u/0/?view=cm&fs=1"
+                                "https://mail.google.com/mail/u/?authuser=${account.email}&view=cm&fs=1"
                             } else {
                                 defaultUrl
                             }
@@ -250,26 +275,16 @@ fun InAppWebmailView(
                             canGoBack = canGoBack()
                             canGoForward = canGoForward()
 
-                            // If we landed on Google accounts home instead of mail, auto-navigate to Gmail
+                            // If we landed on Google accounts home instead of mail, auto-navigate to the user's Gmail
                             if (url != null && (url.contains("myaccount.google.com") || url.contains("accounts.google.com/ServiceLogin"))) {
                                 if (url.contains("myaccount.google.com")) {
-                                    view?.loadUrl("https://mail.google.com/mail/u/0/")
+                                    view?.loadUrl("https://mail.google.com/mail/u/?authuser=${account.email}")
                                 }
                             }
                         }
 
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val targetUrl = request?.url?.toString() ?: return false
-                            // Keep mail, accounts, and login URLs inside the WebView
-                            return if (targetUrl.contains("google.com") || 
-                                       targetUrl.contains("live.com") || 
-                                       targetUrl.contains("yahoo.com") || 
-                                       targetUrl.contains("uniba-bpn.ac.id") ||
-                                       targetUrl.contains("webmail")) {
-                                false
-                            } else {
-                                false
-                            }
+                            return false
                         }
                     }
 

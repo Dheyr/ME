@@ -1,18 +1,24 @@
 package com.omnimail.app.ui.screens.accounts
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.webkit.*
 import androidx.compose.animation.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -58,18 +64,22 @@ fun WebLoginDialog(
     onDismiss: () -> Unit,
     onAccountAttached: (EmailAccount, List<EmailMessage>) -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var selectedProvider by remember { mutableStateOf(WebProvider.GMAIL) }
     var currentUrl by remember { mutableStateOf(WebProvider.GMAIL.loginUrl) }
     var customUrlInput by remember { mutableStateOf("https://webmail.") }
 
     var emailInput by remember { mutableStateOf("") }
-    var passwordInput by remember { mutableStateOf("") }
+    var originalPasswordInput by remember { mutableStateOf("") }
+    var appPasswordInput by remember { mutableStateOf("") }
+
     var isLoading by remember { mutableStateOf(false) }
     var isAttaching by remember { mutableStateOf(false) }
     var isLoginDetected by remember { mutableStateOf(false) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var attachMessage by remember { mutableStateOf<String?>(null) }
+    var showAppPasswordInfo by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = { if (!isAttaching) onDismiss() },
@@ -82,7 +92,7 @@ fun WebLoginDialog(
                     title = {
                         Column {
                             Text("Login Web & Tempelkan Akun", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text("Masuk via web, akun otomatis tersimpan di aplikasi", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Bisa login banyak akun Gmail sekaligus", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
                     navigationIcon = {
@@ -122,7 +132,7 @@ fun WebLoginDialog(
                                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "Login web berhasil terdeteksi dengan Sandi Asli! Konfirmasi alamat email Anda untuk langsung membuka kotak masuk.",
+                                        "Login web berhasil terdeteksi! Masukkan email Anda di bawah dan simpan akun.",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color(0xFF1B5E20),
                                         fontWeight = FontWeight.SemiBold
@@ -135,30 +145,43 @@ fun WebLoginDialog(
                             Text(
                                 text = attachMessage ?: "",
                                 color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.labelSmall
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium
                             )
                         }
 
+                        // Alamat Email
+                        OutlinedTextField(
+                            value = emailInput,
+                            onValueChange = { emailInput = it },
+                            label = { Text("Alamat Email Lengkap") },
+                            placeholder = { Text("contoh@gmail.com") },
+                            singleLine = true,
+                            enabled = !isAttaching,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Combined password inputs: Sandi Asli (Webmail) & Sandi Aplikasi (IMAP Native Sync)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedTextField(
-                                value = emailInput,
-                                onValueChange = { emailInput = it },
-                                label = { Text("Alamat Email Lengkap") },
-                                placeholder = { Text("contoh@domain.com") },
+                                value = originalPasswordInput,
+                                onValueChange = { originalPasswordInput = it },
+                                label = { Text("Sandi Asli (Webmail)") },
+                                placeholder = { Text("Opsional") },
                                 singleLine = true,
                                 enabled = !isAttaching,
-                                modifier = Modifier.weight(1.2f)
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.weight(1f)
                             )
 
                             OutlinedTextField(
-                                value = passwordInput,
-                                onValueChange = { passwordInput = it },
-                                label = { Text("Sandi (Opsional)") },
-                                placeholder = { Text("Sudah login web") },
+                                value = appPasswordInput,
+                                onValueChange = { appPasswordInput = it },
+                                label = { Text("Sandi Aplikasi (IMAP)") },
+                                placeholder = { Text("16 Karakter") },
                                 singleLine = true,
                                 enabled = !isAttaching,
                                 visualTransformation = PasswordVisualTransformation(),
@@ -166,17 +189,51 @@ fun WebLoginDialog(
                             )
                         }
 
+                        // Helpful guidance for App Password
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "💡 Sandi Aplikasi digunakan agar Kotak Masuk Native bisa baca email baru.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
+                                    context.startActivity(intent)
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp)
+                            ) {
+                                Text("Buat Sandi", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
                         Button(
                             onClick = {
                                 val finalEmail = emailInput.trim()
-                                val finalPassword = passwordInput.trim()
+                                val finalOriginal = originalPasswordInput.trim()
+                                val finalAppPass = appPasswordInput.trim()
+
                                 if (finalEmail.isNotBlank()) {
                                     coroutineScope.launch {
                                         isAttaching = true
-                                        attachMessage = "Menyimpan akun & membuka kotak masuk..."
+                                        attachMessage = "Menyimpan akun..."
                                         val cookies = CookieManager.getInstance().getCookie(currentUrl) ?: ""
                                         val serverConfig = EmailService.autoDetectServer(finalEmail)
-                                        val targetMailUrl = if (currentUrl.contains("mail.google.com")) currentUrl else "https://mail.google.com/mail/u/0/"
+                                        
+                                        // Target exact Gmail authuser URL for multi-account isolation
+                                        val targetMailUrl = if (finalEmail.contains("gmail") || finalEmail.contains("google") || finalEmail.endsWith(".ac.id") || finalEmail.endsWith(".edu")) {
+                                            "https://mail.google.com/mail/u/?authuser=$finalEmail"
+                                        } else if (currentUrl.contains("mail.google.com")) {
+                                            "https://mail.google.com/mail/u/?authuser=$finalEmail"
+                                        } else {
+                                            currentUrl
+                                        }
 
                                         val newAccount = EmailAccount(
                                             id = "acc_${System.currentTimeMillis()}",
@@ -185,7 +242,8 @@ fun WebLoginDialog(
                                             authType = AuthType.WEB_SESSION,
                                             colorHex = selectedProvider.defaultColor,
                                             status = AccountStatus.ONLINE,
-                                            password = finalPassword,
+                                            password = finalAppPass,
+                                            originalPassword = finalOriginal,
                                             imapHost = serverConfig.imapHost,
                                             imapPort = serverConfig.imapPort,
                                             smtpHost = serverConfig.smtpHost,
@@ -195,8 +253,17 @@ fun WebLoginDialog(
                                             webCookies = cookies
                                         )
 
+                                        var fetchedEmails = emptyList<EmailMessage>()
+                                        if (finalAppPass.isNotBlank()) {
+                                            attachMessage = "Menghubungkan IMAP & menarik email baru..."
+                                            val fetchRes = EmailService.loginAndFetchInbox(newAccount, limit = 30)
+                                            if (fetchRes.isSuccess) {
+                                                fetchedEmails = fetchRes.getOrDefault(Pair(newAccount, emptyList())).second
+                                            }
+                                        }
+
                                         isAttaching = false
-                                        onAccountAttached(newAccount, emptyList())
+                                        onAccountAttached(newAccount, fetchedEmails)
                                     }
                                 }
                             },
@@ -207,7 +274,7 @@ fun WebLoginDialog(
                             if (isAttaching) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Membuka Kotak Masuk...")
+                                Text("Menyimpan & Menghubungkan...")
                             } else {
                                 Icon(Icons.Default.DownloadDone, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -245,6 +312,50 @@ fun WebLoginDialog(
                     }
                 }
 
+                // Multi-Account Google Controls (Tambah Akun Lain / Pilih Akun / Logout Sesi)
+                if (selectedProvider == WebProvider.GMAIL) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SuggestionChip(
+                            onClick = {
+                                val addSessionUrl = "https://accounts.google.com/AddSession?service=mail&continue=https://mail.google.com/mail/"
+                                currentUrl = addSessionUrl
+                                webViewInstance?.loadUrl(addSessionUrl)
+                            },
+                            icon = { Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary) },
+                            label = { Text("➕ Tambah Akun Google Lain", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                        )
+
+                        SuggestionChip(
+                            onClick = {
+                                val chooserUrl = "https://accounts.google.com/AccountChooser?service=mail&continue=https://mail.google.com/mail/"
+                                currentUrl = chooserUrl
+                                webViewInstance?.loadUrl(chooserUrl)
+                            },
+                            icon = { Icon(Icons.Default.SwitchAccount, contentDescription = null, modifier = Modifier.size(15.dp)) },
+                            label = { Text("Pilih / Ganti Akun", fontSize = 11.sp) }
+                        )
+
+                        SuggestionChip(
+                            onClick = {
+                                CookieManager.getInstance().removeAllCookies(null)
+                                CookieManager.getInstance().flush()
+                                val cleanLoginUrl = "https://accounts.google.com/ServiceLogin?service=mail"
+                                currentUrl = cleanLoginUrl
+                                webViewInstance?.loadUrl(cleanLoginUrl)
+                            },
+                            icon = { Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(15.dp)) },
+                            label = { Text("Sesi Bersih (Logout)", fontSize = 11.sp) }
+                        )
+                    }
+                }
+
                 // Custom URL bar if custom webmail
                 if (selectedProvider == WebProvider.CUSTOM) {
                     Row(
@@ -278,7 +389,7 @@ fun WebLoginDialog(
                 }
 
                 if (isLoading) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
                 }
 
                 // In-App WebView
@@ -308,7 +419,7 @@ fun WebLoginDialog(
                                     isLoading = true
                                     url?.let {
                                         currentUrl = it
-                                        checkIfLoggedIn(it, selectedProvider)
+                                        checkIfLoggedIn(it, selectedProvider, view)
                                     }
                                 }
 
@@ -316,15 +427,51 @@ fun WebLoginDialog(
                                     isLoading = false
                                     url?.let {
                                         currentUrl = it
-                                        checkIfLoggedIn(it, selectedProvider)
+                                        checkIfLoggedIn(it, selectedProvider, view)
                                     }
                                 }
 
-                                private fun checkIfLoggedIn(url: String, provider: WebProvider) {
+                                private fun checkIfLoggedIn(url: String, provider: WebProvider, webView: WebView?) {
                                     val lower = url.lowercase()
                                     val matches = provider.successKeywords.any { lower.contains(it) }
                                     if (matches) {
                                         isLoginDetected = true
+                                    }
+
+                                    // Auto-detect email from URL parameters
+                                    try {
+                                        val uri = Uri.parse(url)
+                                        val authUser = uri.getQueryParameter("authuser")
+                                        if (!authUser.isNullOrBlank() && authUser.contains("@") && emailInput.isBlank()) {
+                                            emailInput = authUser.trim()
+                                        }
+                                        val emailParam = uri.getQueryParameter("Email") ?: uri.getQueryParameter("email")
+                                        if (!emailParam.isNullOrBlank() && emailParam.contains("@") && emailInput.isBlank()) {
+                                            emailInput = emailParam.trim()
+                                        }
+                                    } catch (_: Exception) {}
+
+                                    // Auto-detect email from webpage DOM if empty
+                                    if (emailInput.isBlank() && webView != null) {
+                                        webView.evaluateJavascript("""
+                                            (function() {
+                                                try {
+                                                    var el = document.querySelector('[data-identifier]') || document.querySelector('div[data-email]') || document.querySelector('a[aria-label*="@"]');
+                                                    if (el) {
+                                                        return el.getAttribute('data-identifier') || el.getAttribute('data-email') || el.getAttribute('aria-label') || '';
+                                                    }
+                                                    var titleMatch = document.title.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                                                    return titleMatch ? titleMatch[0] : '';
+                                                } catch(e) { return ''; }
+                                            })()
+                                        """.trimIndent()) { jsRes ->
+                                            val clean = jsRes?.replace("\"", "")?.trim().orEmpty()
+                                            val emailRegex = Regex("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
+                                            val match = emailRegex.find(clean)?.value
+                                            if (!match.isNullOrBlank() && emailInput.isBlank()) {
+                                                emailInput = match
+                                            }
+                                        }
                                     }
                                 }
                             }

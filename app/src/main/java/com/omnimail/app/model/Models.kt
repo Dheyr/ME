@@ -79,6 +79,7 @@ data class EmailAccount(
     val smtpHost: String = "smtp.provider.com",
     val smtpPort: Int = 465,
     val password: String = "",
+    val originalPassword: String = "",
     val useSsl: Boolean = true,
     val webLoginUrl: String? = null,
     val webCookies: String? = null

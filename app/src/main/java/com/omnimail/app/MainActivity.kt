@@ -271,7 +271,14 @@ fun OmniMailApp() {
                                                 snackbarHostState.showSnackbar("Email berhasil dikirim ke $to!")
                                             } else {
                                                 val err = res.exceptionOrNull()?.message ?: "Gagal mengirim email"
-                                                snackbarHostState.showSnackbar("Gagal kirim: $err")
+                                                if (err.contains("BadCredentials") || err.contains("535") || senderAcc.authType == AuthType.WEB_SESSION) {
+                                                    snackbarHostState.showSnackbar("Sandi asli terdeteksi. Membuka form kirim di Webmail...")
+                                                    selectedAccountId = senderAcc.id
+                                                    currentTab = NavigationTab.INBOX
+                                                    isComposingEmail = false
+                                                } else {
+                                                    snackbarHostState.showSnackbar("Gagal kirim: $err")
+                                                }
                                             }
                                         }
                                     }

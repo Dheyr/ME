@@ -122,7 +122,7 @@ fun WebLoginDialog(
                                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "Login web berhasil terdeteksi! Masukkan email & sandi/sandi aplikasi untuk menyinkronkan kotak masuk secara native.",
+                                        "Login web berhasil terdeteksi dengan Sandi Asli! Konfirmasi alamat email Anda untuk langsung membuka kotak masuk.",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color(0xFF1B5E20),
                                         fontWeight = FontWeight.SemiBold
@@ -157,7 +157,8 @@ fun WebLoginDialog(
                             OutlinedTextField(
                                 value = passwordInput,
                                 onValueChange = { passwordInput = it },
-                                label = { Text("Sandi / App Pass") },
+                                label = { Text("Sandi (Opsional)") },
+                                placeholder = { Text("Sudah login web") },
                                 singleLine = true,
                                 enabled = !isAttaching,
                                 visualTransformation = PasswordVisualTransformation(),
@@ -172,9 +173,10 @@ fun WebLoginDialog(
                                 if (finalEmail.isNotBlank()) {
                                     coroutineScope.launch {
                                         isAttaching = true
-                                        attachMessage = "Sedang menghubungkan & membaca kotak masuk..."
+                                        attachMessage = "Menyimpan akun & membuka kotak masuk..."
                                         val cookies = CookieManager.getInstance().getCookie(currentUrl) ?: ""
                                         val serverConfig = EmailService.autoDetectServer(finalEmail)
+                                        val targetMailUrl = if (currentUrl.contains("mail.google.com")) currentUrl else "https://mail.google.com/mail/u/0/"
 
                                         val newAccount = EmailAccount(
                                             id = "acc_${System.currentTimeMillis()}",
@@ -189,24 +191,12 @@ fun WebLoginDialog(
                                             smtpHost = serverConfig.smtpHost,
                                             smtpPort = serverConfig.smtpPort,
                                             useSsl = serverConfig.useSsl,
-                                            webLoginUrl = currentUrl,
+                                            webLoginUrl = targetMailUrl,
                                             webCookies = cookies
                                         )
 
-                                        // Try fetching real inbox via IMAP
-                                        val fetchResult = if (finalPassword.isNotBlank()) {
-                                            EmailService.loginAndFetchInbox(newAccount, limit = 30)
-                                        } else null
-
                                         isAttaching = false
-
-                                        if (fetchResult != null && fetchResult.isSuccess) {
-                                            val (workingAccount, fetchedEmails) = fetchResult.getOrThrow()
-                                            onAccountAttached(workingAccount, fetchedEmails)
-                                        } else {
-                                            // Attach account directly even if IMAP requires app password
-                                            onAccountAttached(newAccount, emptyList())
-                                        }
+                                        onAccountAttached(newAccount, emptyList())
                                     }
                                 }
                             },
@@ -217,7 +207,7 @@ fun WebLoginDialog(
                             if (isAttaching) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Menyinkronkan Akun & Kotak Masuk...")
+                                Text("Membuka Kotak Masuk...")
                             } else {
                                 Icon(Icons.Default.DownloadDone, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))

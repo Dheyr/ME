@@ -74,6 +74,20 @@ fun UnifiedInboxScreen(
         }
     }
 
+    val selectedAccount = remember(selectedAccountId, accounts) {
+        accounts.find { it.id == selectedAccountId }
+    }
+
+    // If an individual Web Session account is selected, directly render the full-screen In-App Webmail
+    if (selectedAccount != null && selectedAccount.authType == com.omnimail.app.model.AuthType.WEB_SESSION) {
+        InAppWebmailView(
+            account = selectedAccount,
+            onBackToUnified = { onSelectAccount(null) },
+            modifier = modifier
+        )
+        return
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         // Bulk Action Header if selection mode is active
         AnimatedVisibility(
@@ -196,12 +210,12 @@ fun UnifiedInboxScreen(
             }
         }
 
-        // Email List
+        // Email List or Account Launcher
         if (filteredEmails.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(32.dp),
+                    .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
                 if (accounts.isEmpty()) {
@@ -245,45 +259,87 @@ fun UnifiedInboxScreen(
                         }
                     }
                 } else {
-                    val (emptyTitle, emptyDesc) = when (selectedFolder) {
-                        EmailFolder.INBOX -> "Kotak Masuk Kosong" to "Tarik email terbaru dari server IMAP akun yang terhubung."
-                        EmailFolder.DRAFTS -> "Belum Ada Draf" to "Tidak ada draf email yang tersimpan."
-                        EmailFolder.SENT -> "Belum Ada Email Terkirim" to "Email yang Anda kirim akan muncul di sini."
-                        EmailFolder.STARRED -> "Belum Ada Email Berbintang" to "Tandai email dengan bintang untuk menyimpannya di sini."
-                        EmailFolder.TRASH -> "Kotak Sampah Kosong" to "Tidak ada email di kotak sampah."
-                        EmailFolder.SPAM -> "Tidak Ada Spam" to "Kotak spam bersih."
-                    }
-
+                    // Accounts exist, show account launcher cards
                     Column(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            Icons.Outlined.MailOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
                         Text(
-                            text = emptyTitle,
+                            text = "Buka Kotak Masuk Akun Anda",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = emptyDesc,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            text = "Pilih akun di bawah untuk membuka kotak masuk langsung dengan kata sandi asli:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                        if (selectedFolder == EmailFolder.INBOX) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            OutlinedButton(
-                                onClick = onManualSync,
-                                shape = RoundedCornerShape(10.dp)
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        accounts.forEach { acc ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelectAccount(acc.id) }
                             ) {
-                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(acc.colorHex))
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = acc.displayName.ifBlank { acc.email },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = acc.email,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        if (acc.authType == com.omnimail.app.model.AuthType.WEB_SESSION) {
+                                            Text(
+                                                text = "🟢 Terhubung dengan Sandi Asli (Webmail)",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF2E7D32),
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { onSelectAccount(acc.id) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Buka Inbox", style = MaterialTheme.typography.labelMedium)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        if (selectedFolder == EmailFolder.INBOX) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            TextButton(onClick = onManualSync) {
+                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Sinkronkan Sekarang")
+                                Text("Coba Sinkronkan IMAP", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }

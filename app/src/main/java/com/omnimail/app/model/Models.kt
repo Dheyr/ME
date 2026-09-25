@@ -76,7 +76,9 @@ data class EmailAccount(
     val imapHost: String = "imap.provider.com",
     val imapPort: Int = 993,
     val smtpHost: String = "smtp.provider.com",
-    val smtpPort: Int = 465
+    val smtpPort: Int = 465,
+    val password: String = "",
+    val useSsl: Boolean = true
 )
 
 data class WorkspaceGroup(

@@ -53,6 +53,9 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/NOTICE*"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/INDEX.LIST"
         }
     }
 
@@ -73,6 +76,9 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.android.mail)
+    implementation(libs.android.activation)
+    implementation(libs.gson)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

@@ -33,7 +33,7 @@ fun GlobalSearchScreen(
     var isServerSearchActive by remember { mutableStateOf(false) }
 
     val recentSearches = remember {
-        mutableStateListOf("Invoice", "Acme Corp", "Term Sheet", "Garuda", "SLA Alert")
+        mutableStateListOf<String>()
     }
 
     val searchResults = remember(searchQuery, filterHasAttachment, filterUnreadOnly, allEmails) {

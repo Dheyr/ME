@@ -20,11 +20,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.omnimail.app.data.SampleData
+import com.omnimail.app.data.OmniStorage
 import com.omnimail.app.model.*
+import com.omnimail.app.service.EmailService
 import com.omnimail.app.ui.components.*
 import com.omnimail.app.ui.screens.accounts.AccountManagementScreen
 import com.omnimail.app.ui.screens.accounts.BulkImportCsvDialog
@@ -34,7 +36,6 @@ import com.omnimail.app.ui.screens.inbox.UnifiedInboxScreen
 import com.omnimail.app.ui.screens.search.GlobalSearchScreen
 import com.omnimail.app.ui.screens.settings.SettingsScreen
 import com.omnimail.app.ui.theme.OmniMailTheme
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -48,18 +49,20 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun OmniMailApp() {
+    val context = LocalContext.current
     val systemDark = isSystemInDarkTheme()
     var isDarkTheme by remember { mutableStateOf(systemDark) }
 
     OmniMailTheme(darkTheme = isDarkTheme) {
         val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val coroutineScope = rememberCoroutineScope()
+        val snackbarHostState = remember { SnackbarHostState() }
 
-        // Master State
-        var accounts by remember { mutableStateOf(SampleData.sampleAccounts) }
-        var groups by remember { mutableStateOf(SampleData.sampleGroups) }
-        var emails by remember { mutableStateOf(SampleData.sampleEmails) }
-        var settings by remember { mutableStateOf(SyncSettings()) }
+        // Persistent Master State (Clean by default - zero dummy data)
+        var accounts by remember { mutableStateOf(OmniStorage.loadAccounts(context)) }
+        var groups by remember { mutableStateOf(OmniStorage.loadGroups(context)) }
+        var emails by remember { mutableStateOf(OmniStorage.loadEmails(context)) }
+        var settings by remember { mutableStateOf(OmniStorage.loadSettings(context)) }
 
         // Navigation State
         var currentTab by remember { mutableStateOf(NavigationTab.INBOX) }
@@ -72,6 +75,57 @@ fun OmniMailApp() {
         var showDrawerBulkImport by remember { mutableStateOf(false) }
         var showTopFilterDialog by remember { mutableStateOf(false) }
         var isManualSyncing by remember { mutableStateOf(false) }
+
+        // Function: Real background sync for all accounts via IMAP
+        val syncAllAccounts: () -> Unit = {
+            if (accounts.isEmpty()) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Belum ada akun yang terhubung. Tambahkan akun terlebih dahulu.")
+                }
+            } else {
+                coroutineScope.launch {
+                    isManualSyncing = true
+                    var totalNew = 0
+                    val allFetched = mutableListOf<EmailMessage>()
+                    val updatedAccounts = accounts.toMutableList()
+
+                    for ((idx, acc) in accounts.withIndex()) {
+                        val res = EmailService.fetchInboxEmails(acc, limit = 25)
+                        if (res.isSuccess) {
+                            val fetched = res.getOrDefault(emptyList())
+                            allFetched.addAll(fetched)
+                            val unread = fetched.count { !it.isRead }
+                            updatedAccounts[idx] = acc.copy(unreadCount = unread, status = AccountStatus.ONLINE)
+                        } else {
+                            updatedAccounts[idx] = acc.copy(status = AccountStatus.ERROR)
+                        }
+                    }
+
+                    if (allFetched.isNotEmpty()) {
+                        val existingIds = emails.map { it.id }.toSet()
+                        val newlyAdded = allFetched.filter { it.id !in existingIds }
+                        totalNew = newlyAdded.size
+                        val merged = (newlyAdded + emails).sortedByDescending { it.timestamp }
+                        emails = merged
+                        OmniStorage.saveEmails(context, merged)
+                    }
+                    accounts = updatedAccounts
+                    OmniStorage.saveAccounts(context, updatedAccounts)
+
+                    isManualSyncing = false
+                    snackbarHostState.showSnackbar(
+                        if (totalNew > 0) "$totalNew email baru berhasil ditarik!" else "Semua kotak masuk sudah diperbarui."
+                    )
+                }
+            }
+        }
+
+        // Auto-sync on startup if accounts are present
+        LaunchedEffect(Unit) {
+            if (accounts.isNotEmpty()) {
+                syncAllAccounts()
+            }
+        }
 
         // Total Unread Count
         val totalUnread = emails.count { !it.isRead }
@@ -123,6 +177,7 @@ fun OmniMailApp() {
             }
         ) {
             Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
                     if (activeEmailDetail == null && !isComposingEmail && currentTab == NavigationTab.INBOX) {
                         OmniTopAppBar(
@@ -135,13 +190,7 @@ fun OmniMailApp() {
                                 coroutineScope.launch { drawerState.open() }
                             },
                             onOpenSearch = { currentTab = NavigationTab.SEARCH },
-                            onManualSync = {
-                                coroutineScope.launch {
-                                    isManualSyncing = true
-                                    delay(1500)
-                                    isManualSyncing = false
-                                }
-                            },
+                            onManualSync = { syncAllAccounts() },
                             onFilterClick = { showTopFilterDialog = true }
                         )
                     }
@@ -161,7 +210,15 @@ fun OmniMailApp() {
                 floatingActionButton = {
                     if (activeEmailDetail == null && !isComposingEmail && currentTab == NavigationTab.INBOX) {
                         ExtendedFloatingActionButton(
-                            onClick = { isComposingEmail = true },
+                            onClick = {
+                                if (accounts.isEmpty()) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Tambahkan akun terlebih dahulu untuk mengirim email.")
+                                    }
+                                } else {
+                                    isComposingEmail = true
+                                }
+                            },
                             icon = { Icon(Icons.Default.Edit, contentDescription = "Tulis Email") },
                             text = { Text("Tulis Email") },
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -183,27 +240,45 @@ fun OmniMailApp() {
                                 accounts = accounts,
                                 onDiscard = { isComposingEmail = false },
                                 onSend = { senderId, to, subject, body, attachments ->
-                                    val senderAcc = accounts.find { it.id == senderId } ?: accounts.first()
-                                    val newSentEmail = EmailMessage(
-                                        id = "msg_${System.currentTimeMillis()}",
-                                        accountId = senderAcc.id,
-                                        accountEmail = senderAcc.email,
-                                        accountColorHex = senderAcc.colorHex,
-                                        senderName = senderAcc.displayName,
-                                        senderEmail = senderAcc.email,
-                                        recipients = listOf(to),
-                                        subject = subject,
-                                        snippet = body.take(80),
-                                        bodyText = body,
-                                        timestamp = System.currentTimeMillis(),
-                                        formattedTime = "Baru saja",
-                                        isRead = true,
-                                        hasAttachments = attachments.isNotEmpty(),
-                                        attachments = attachments,
-                                        folder = EmailFolder.SENT
-                                    )
-                                    emails = listOf(newSentEmail) + emails
-                                    isComposingEmail = false
+                                    val senderAcc = accounts.find { it.id == senderId } ?: accounts.firstOrNull()
+                                    if (senderAcc != null) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Sedang mengirim email via SMTP...")
+                                            val res = EmailService.sendEmail(
+                                                fromAccount = senderAcc,
+                                                recipients = listOf(to),
+                                                subject = subject,
+                                                body = body
+                                            )
+                                            if (res.isSuccess) {
+                                                val newSentEmail = EmailMessage(
+                                                    id = "sent_${System.currentTimeMillis()}",
+                                                    accountId = senderAcc.id,
+                                                    accountEmail = senderAcc.email,
+                                                    accountColorHex = senderAcc.colorHex,
+                                                    senderName = senderAcc.displayName,
+                                                    senderEmail = senderAcc.email,
+                                                    recipients = listOf(to),
+                                                    subject = subject,
+                                                    snippet = body.take(80),
+                                                    bodyText = body,
+                                                    timestamp = System.currentTimeMillis(),
+                                                    formattedTime = "Baru saja",
+                                                    isRead = true,
+                                                    hasAttachments = attachments.isNotEmpty(),
+                                                    attachments = attachments,
+                                                    folder = EmailFolder.SENT
+                                                )
+                                                emails = listOf(newSentEmail) + emails
+                                                OmniStorage.saveEmails(context, emails)
+                                                isComposingEmail = false
+                                                snackbarHostState.showSnackbar("Email berhasil dikirim ke $to!")
+                                            } else {
+                                                val err = res.exceptionOrNull()?.message ?: "Gagal mengirim email"
+                                                snackbarHostState.showSnackbar("Gagal kirim: $err")
+                                            }
+                                        }
+                                    }
                                 }
                             )
                         }
@@ -218,12 +293,14 @@ fun OmniMailApp() {
                                 },
                                 onDelete = { id ->
                                     emails = emails.filter { it.id != id }
+                                    OmniStorage.saveEmails(context, emails)
                                     activeEmailDetail = null
                                 },
                                 onToggleStar = { id ->
                                     emails = emails.map {
                                         if (it.id == id) it.copy(isStarred = !it.isStarred) else it
                                     }
+                                    OmniStorage.saveEmails(context, emails)
                                     activeEmailDetail = activeEmailDetail?.copy(isStarred = !(activeEmailDetail?.isStarred ?: false))
                                 }
                             )
@@ -243,27 +320,35 @@ fun OmniMailApp() {
                                             emails = emails.map {
                                                 if (it.id == email.id) it.copy(isRead = true) else it
                                             }
+                                            OmniStorage.saveEmails(context, emails)
                                             activeEmailDetail = email.copy(isRead = true)
                                         },
                                         onToggleStar = { id ->
                                             emails = emails.map {
                                                 if (it.id == id) it.copy(isStarred = !it.isStarred) else it
                                             }
+                                            OmniStorage.saveEmails(context, emails)
                                         },
                                         onDeleteEmail = { id ->
                                             emails = emails.filter { it.id != id }
+                                            OmniStorage.saveEmails(context, emails)
                                         },
                                         onMarkAsRead = { ids ->
                                             emails = emails.map {
                                                 if (ids.contains(it.id)) it.copy(isRead = true) else it
                                             }
+                                            OmniStorage.saveEmails(context, emails)
                                         },
                                         onDeleteBatch = { ids ->
                                             emails = emails.filter { !ids.contains(it.id) }
+                                            OmniStorage.saveEmails(context, emails)
                                         },
                                         onArchiveBatch = { ids ->
                                             emails = emails.filter { !ids.contains(it.id) }
-                                        }
+                                            OmniStorage.saveEmails(context, emails)
+                                        },
+                                        onNavigateToAccounts = { currentTab = NavigationTab.ACCOUNTS },
+                                        onManualSync = { syncAllAccounts() }
                                     )
                                 }
                                 NavigationTab.SEARCH -> {
@@ -273,12 +358,14 @@ fun OmniMailApp() {
                                             emails = emails.map {
                                                 if (it.id == email.id) it.copy(isRead = true) else it
                                             }
+                                            OmniStorage.saveEmails(context, emails)
                                             activeEmailDetail = email.copy(isRead = true)
                                         },
                                         onToggleStar = { id ->
                                             emails = emails.map {
                                                 if (it.id == id) it.copy(isStarred = !it.isStarred) else it
                                             }
+                                            OmniStorage.saveEmails(context, emails)
                                         }
                                     )
                                 }
@@ -287,14 +374,60 @@ fun OmniMailApp() {
                                         accounts = accounts,
                                         groups = groups,
                                         onAddSingleAccount = { newAcc ->
-                                            accounts = accounts + newAcc
+                                            val updated = accounts + newAcc
+                                            accounts = updated
+                                            OmniStorage.saveAccounts(context, updated)
+
+                                            groups = groups.map { grp ->
+                                                if (grp.id == newAcc.workspaceGroupId) grp.copy(accountIds = grp.accountIds + newAcc.id) else grp
+                                            }
+                                            OmniStorage.saveGroups(context, groups)
+
+                                            // Automatically trigger sync for newly added account
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Akun ${newAcc.email} ditambahkan. Menarik email...")
+                                                val res = EmailService.fetchInboxEmails(newAcc, limit = 25)
+                                                if (res.isSuccess) {
+                                                    val fetched = res.getOrDefault(emptyList())
+                                                    val merged = (fetched + emails).distinctBy { it.id }.sortedByDescending { it.timestamp }
+                                                    emails = merged
+                                                    OmniStorage.saveEmails(context, merged)
+                                                    val refreshedAccounts = accounts.map {
+                                                        if (it.id == newAcc.id) it.copy(unreadCount = fetched.count { m -> !m.isRead }) else it
+                                                    }
+                                                    accounts = refreshedAccounts
+                                                    OmniStorage.saveAccounts(context, refreshedAccounts)
+                                                    snackbarHostState.showSnackbar("${fetched.size} email berhasil ditarik dari ${newAcc.email}!")
+                                                }
+                                            }
                                         },
                                         onBulkImportAccounts = { importedList ->
-                                            accounts = accounts + importedList
+                                            val updated = accounts + importedList
+                                            accounts = updated
+                                            OmniStorage.saveAccounts(context, updated)
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("${importedList.size} akun berhasil diimpor! Menarik email...")
+                                                syncAllAccounts()
+                                            }
                                         },
                                         onUpdateAccountProxy = { accId, proxy ->
-                                            accounts = accounts.map {
+                                            val updated = accounts.map {
                                                 if (it.id == accId) it.copy(proxyConfig = proxy) else it
+                                            }
+                                            accounts = updated
+                                            OmniStorage.saveAccounts(context, updated)
+                                        },
+                                        onDeleteAccount = { accId ->
+                                            val deleted = accounts.find { it.id == accId }
+                                            val updated = accounts.filter { it.id != accId }
+                                            accounts = updated
+                                            emails = emails.filter { it.accountId != accId }
+                                            groups = groups.map { it.copy(accountIds = it.accountIds.filter { id -> id != accId }) }
+                                            OmniStorage.saveAccounts(context, updated)
+                                            OmniStorage.saveEmails(context, emails)
+                                            OmniStorage.saveGroups(context, groups)
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Akun ${deleted?.email ?: ""} telah dihapus.")
                                             }
                                         }
                                     )
@@ -304,7 +437,10 @@ fun OmniMailApp() {
                                         currentSettings = settings,
                                         isDarkTheme = isDarkTheme,
                                         onToggleDarkTheme = { isDarkTheme = it },
-                                        onUpdateSettings = { settings = it }
+                                        onUpdateSettings = {
+                                            settings = it
+                                            OmniStorage.saveSettings(context, it)
+                                        }
                                     )
                                 }
                             }
@@ -395,8 +531,14 @@ fun OmniMailApp() {
                 groups = groups,
                 onDismiss = { showDrawerBulkImport = false },
                 onImportComplete = { imported ->
-                    accounts = accounts + imported
+                    val updated = accounts + imported
+                    accounts = updated
+                    OmniStorage.saveAccounts(context, updated)
                     showDrawerBulkImport = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("${imported.size} akun berhasil diimpor! Menarik email...")
+                        syncAllAccounts()
+                    }
                 }
             )
         }

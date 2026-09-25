@@ -117,6 +117,7 @@ fun OmniTopAppBar(
 
 enum class NavigationTab {
     INBOX,
+    WEBMAIL,
     SEARCH,
     ACCOUNTS,
     SETTINGS
@@ -152,6 +153,18 @@ fun OmniBottomBar(
                 }
             },
             label = { Text("Inbox") }
+        )
+
+        NavigationBarItem(
+            selected = currentTab == NavigationTab.WEBMAIL,
+            onClick = { onTabSelected(NavigationTab.WEBMAIL) },
+            icon = {
+                Icon(
+                    if (currentTab == NavigationTab.WEBMAIL) Icons.Filled.Language else Icons.Outlined.Language,
+                    contentDescription = "Webmail"
+                )
+            },
+            label = { Text("Webmail") }
         )
 
         NavigationBarItem(

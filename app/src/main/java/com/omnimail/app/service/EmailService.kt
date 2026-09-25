@@ -76,60 +76,84 @@ object EmailService {
         }
     }
 
-    suspend fun testConnection(account: EmailAccount): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val props = Properties().apply {
-                put("mail.store.protocol", "imaps")
-                put("mail.imaps.host", account.imapHost)
-                put("mail.imaps.port", account.imapPort.toString())
-                put("mail.imaps.ssl.enable", if (account.useSsl) "true" else "false")
-                put("mail.imaps.timeout", "10000")
-                put("mail.imaps.connectiontimeout", "10000")
+    private fun getImapStore(account: EmailAccount, port: Int, useSsl: Boolean): Pair<Session, Store> {
+        val protocol = if (useSsl) "imaps" else "imap"
+        val props = Properties().apply {
+            put("mail.store.protocol", protocol)
+            put("mail.$protocol.host", account.imapHost)
+            put("mail.$protocol.port", port.toString())
+            put("mail.$protocol.timeout", "10000")
+            put("mail.$protocol.connectiontimeout", "10000")
 
-                // SOCKS5 Proxy support
-                account.proxyConfig?.let { proxy ->
-                    if (proxy.enabled && proxy.host.isNotBlank()) {
-                        put("mail.imaps.socks.host", proxy.host)
-                        put("mail.imaps.socks.port", proxy.port.toString())
-                    }
-                }
+            // Enable common auth methods for real passwords
+            put("mail.$protocol.auth.plain.disable", "false")
+            put("mail.$protocol.auth.login.disable", "false")
+
+            // Trust all certificates (cPanel, self-signed, VPS, etc.)
+            put("mail.$protocol.ssl.trust", "*")
+
+            if (useSsl) {
+                put("mail.$protocol.ssl.enable", "true")
+                put("mail.$protocol.ssl.checkserveridentity", "false")
+            } else {
+                put("mail.$protocol.starttls.enable", "true")
+                put("mail.$protocol.starttls.required", "false")
             }
 
-            val session = Session.getInstance(props)
-            val store = session.getStore("imaps")
-            store.connect(account.imapHost, account.imapPort, account.email, account.password)
-            val isConnected = store.isConnected
-            store.close()
-            Result.success(isConnected)
-        } catch (e: Exception) {
-            val msg = e.localizedMessage ?: e.message ?: "Gagal terhubung ke server IMAP"
-            Result.failure(Exception(msg))
+            // SOCKS5 Proxy support
+            account.proxyConfig?.let { proxy ->
+                if (proxy.enabled && proxy.host.isNotBlank()) {
+                    put("mail.$protocol.socks.host", proxy.host)
+                    put("mail.$protocol.socks.port", proxy.port.toString())
+                }
+            }
         }
+
+        val session = Session.getInstance(props)
+        val store = session.getStore(protocol)
+        return Pair(session, store)
+    }
+
+    suspend fun testConnection(account: EmailAccount): Result<Boolean> = withContext(Dispatchers.IO) {
+        // Multi-fallback strategy: Try configured SSL, then STARTTLS, try full email then username
+        val attempts = listOf(
+            Triple(account.imapPort, account.useSsl, account.email),
+            Triple(if (account.imapPort == 993) 143 else 993, !account.useSsl, account.email),
+            Triple(account.imapPort, account.useSsl, account.email.substringBefore("@"))
+        )
+
+        var lastError: Exception? = null
+
+        for ((port, ssl, user) in attempts) {
+            try {
+                val (_, store) = getImapStore(account, port, ssl)
+                store.connect(account.imapHost, port, user, account.password)
+                if (store.isConnected) {
+                    store.close()
+                    return@withContext Result.success(true)
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+
+        val msg = lastError?.localizedMessage ?: lastError?.message ?: "Gagal terhubung ke server IMAP"
+        Result.failure(Exception(msg))
     }
 
     suspend fun fetchInboxEmails(account: EmailAccount, limit: Int = 30): Result<List<EmailMessage>> = withContext(Dispatchers.IO) {
         var store: Store? = null
         var folder: Folder? = null
         try {
-            val props = Properties().apply {
-                put("mail.store.protocol", "imaps")
-                put("mail.imaps.host", account.imapHost)
-                put("mail.imaps.port", account.imapPort.toString())
-                put("mail.imaps.ssl.enable", if (account.useSsl) "true" else "false")
-                put("mail.imaps.timeout", "15000")
-                put("mail.imaps.connectiontimeout", "15000")
-
-                account.proxyConfig?.let { proxy ->
-                    if (proxy.enabled && proxy.host.isNotBlank()) {
-                        put("mail.imaps.socks.host", proxy.host)
-                        put("mail.imaps.socks.port", proxy.port.toString())
-                    }
-                }
+            // Connect with fallback
+            val (_, s) = getImapStore(account, account.imapPort, account.useSsl)
+            store = s
+            try {
+                store.connect(account.imapHost, account.imapPort, account.email, account.password)
+            } catch (e: Exception) {
+                // Try fallback username without domain
+                store.connect(account.imapHost, account.imapPort, account.email.substringBefore("@"), account.password)
             }
-
-            val session = Session.getInstance(props)
-            store = session.getStore("imaps")
-            store.connect(account.imapHost, account.imapPort, account.email, account.password)
 
             folder = store.getFolder("INBOX")
             folder.open(Folder.READ_ONLY)
@@ -217,58 +241,76 @@ object EmailService {
         subject: String,
         body: String
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val props = Properties().apply {
-                put("mail.smtp.auth", "true")
-                put("mail.smtp.host", fromAccount.smtpHost)
-                put("mail.smtp.port", fromAccount.smtpPort.toString())
-                if (fromAccount.smtpPort == 465) {
-                    put("mail.smtp.ssl.enable", "true")
-                    put("mail.smtp.socketFactory.port", "465")
-                    put("mail.smtp.socketFactory.class", "javax.net.ssl.SSLSocketFactory")
-                } else {
-                    put("mail.smtp.starttls.enable", "true")
-                }
-                put("mail.smtp.timeout", "15000")
-                put("mail.smtp.connectiontimeout", "15000")
+        val attempts = listOf(
+            Pair(fromAccount.smtpPort, fromAccount.useSsl),
+            Pair(if (fromAccount.smtpPort == 465) 587 else 465, fromAccount.smtpPort != 465)
+        )
 
-                fromAccount.proxyConfig?.let { proxy ->
-                    if (proxy.enabled && proxy.host.isNotBlank()) {
-                        put("mail.smtp.socks.host", proxy.host)
-                        put("mail.smtp.socks.port", proxy.port.toString())
+        var lastError: Exception? = null
+
+        for ((port, ssl) in attempts) {
+            try {
+                val protocol = if (ssl && port == 465) "smtps" else "smtp"
+                val props = Properties().apply {
+                    put("mail.$protocol.auth", "true")
+                    put("mail.$protocol.host", fromAccount.smtpHost)
+                    put("mail.$protocol.port", port.toString())
+                    put("mail.$protocol.timeout", "15000")
+                    put("mail.$protocol.connectiontimeout", "15000")
+                    put("mail.$protocol.auth.plain.disable", "false")
+                    put("mail.$protocol.auth.login.disable", "false")
+                    put("mail.$protocol.ssl.trust", "*")
+
+                    if (ssl && port == 465) {
+                        put("mail.$protocol.ssl.enable", "true")
+                        put("mail.$protocol.ssl.checkserveridentity", "false")
+                        put("mail.$protocol.socketFactory.port", "465")
+                        put("mail.$protocol.socketFactory.class", "javax.net.ssl.SSLSocketFactory")
+                    } else {
+                        put("mail.$protocol.starttls.enable", "true")
+                        put("mail.$protocol.starttls.required", "false")
+                    }
+
+                    fromAccount.proxyConfig?.let { proxy ->
+                        if (proxy.enabled && proxy.host.isNotBlank()) {
+                            put("mail.$protocol.socks.host", proxy.host)
+                            put("mail.$protocol.socks.port", proxy.port.toString())
+                        }
                     }
                 }
-            }
 
-            val session = Session.getInstance(props, object : Authenticator() {
-                override fun getPasswordAuthentication(): PasswordAuthentication {
-                    return PasswordAuthentication(fromAccount.email, fromAccount.password)
+                val session = Session.getInstance(props, object : Authenticator() {
+                    override fun getPasswordAuthentication(): PasswordAuthentication {
+                        return PasswordAuthentication(fromAccount.email, fromAccount.password)
+                    }
+                })
+
+                val message = MimeMessage(session).apply {
+                    setFrom(InternetAddress(fromAccount.email, fromAccount.displayName.ifBlank { fromAccount.email }))
+                    val recipientAddresses = recipients
+                        .filter { it.isNotBlank() }
+                        .map { InternetAddress(it.trim()) }
+                        .toTypedArray()
+                    setRecipients(Message.RecipientType.TO, recipientAddresses)
+                    setSubject(subject, "UTF-8")
+
+                    val fullBody = if (fromAccount.signature.isNotBlank()) {
+                        "$body\n\n--\n${fromAccount.signature}"
+                    } else {
+                        body
+                    }
+                    setText(fullBody, "UTF-8")
+                    sentDate = Date()
                 }
-            })
 
-            val message = MimeMessage(session).apply {
-                setFrom(InternetAddress(fromAccount.email, fromAccount.displayName.ifBlank { fromAccount.email }))
-                val recipientAddresses = recipients
-                    .filter { it.isNotBlank() }
-                    .map { InternetAddress(it.trim()) }
-                    .toTypedArray()
-                setRecipients(Message.RecipientType.TO, recipientAddresses)
-                setSubject(subject, "UTF-8")
-
-                val fullBody = if (fromAccount.signature.isNotBlank()) {
-                    "$body\n\n--\n${fromAccount.signature}"
-                } else {
-                    body
-                }
-                setText(fullBody, "UTF-8")
-                sentDate = Date()
+                Transport.send(message)
+                return@withContext Result.success(true)
+            } catch (e: Exception) {
+                lastError = e
             }
-
-            Transport.send(message)
-            Result.success(true)
-        } catch (e: Exception) {
-            Result.failure(Exception(e.localizedMessage ?: e.message ?: "Gagal mengirim email via SMTP"))
         }
+
+        Result.failure(Exception(lastError?.localizedMessage ?: lastError?.message ?: "Gagal mengirim email via SMTP"))
     }
 
     private fun extractText(part: Part): String {

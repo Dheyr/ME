@@ -35,6 +35,7 @@ import com.omnimail.app.ui.screens.detail.EmailDetailScreen
 import com.omnimail.app.ui.screens.inbox.UnifiedInboxScreen
 import com.omnimail.app.ui.screens.search.GlobalSearchScreen
 import com.omnimail.app.ui.screens.settings.SettingsScreen
+import com.omnimail.app.ui.screens.webmail.WebmailScreen
 import com.omnimail.app.ui.theme.OmniMailTheme
 import kotlinx.coroutines.launch
 
@@ -349,6 +350,11 @@ fun OmniMailApp() {
                                         },
                                         onNavigateToAccounts = { currentTab = NavigationTab.ACCOUNTS },
                                         onManualSync = { syncAllAccounts() }
+                                    )
+                                }
+                                NavigationTab.WEBMAIL -> {
+                                    WebmailScreen(
+                                        onNavigateBack = { currentTab = NavigationTab.INBOX }
                                     )
                                 }
                                 NavigationTab.SEARCH -> {

@@ -408,9 +408,9 @@ fun AddSingleAccountDialog(
                     .padding(20.dp)
                     .fillMaxWidth()
             ) {
-                Text("Tambah Akun Email Sungguhan", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Tambah Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Mendukung Gmail, Outlook, Yahoo, Zoho, dan cPanel/Custom IMAP",
+                    "Mendukung login langsung dengan kata sandi asli email Anda",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -426,7 +426,7 @@ fun AddSingleAccountDialog(
                         verticalAlignment = Alignment.Top
                     ) {
                         Icon(
-                            Icons.Outlined.Info,
+                            Icons.Outlined.CheckCircle,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
@@ -435,7 +435,7 @@ fun AddSingleAccountDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Untuk Gmail & Yahoo: Aktifkan 2-Step Verification di akun Anda, lalu gunakan Sandi Aplikasi (App Password 16 karakter), bukan sandi akun biasa.",
+                            "Anda dapat memasukkan kata sandi asli email Anda di sini. Untuk Gmail & webmail lainnya, Anda juga dapat membuka tab 'Webmail' di navigasi bawah untuk login langsung seperti di browser.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -448,7 +448,7 @@ fun AddSingleAccountDialog(
                     value = emailInput,
                     onValueChange = { emailInput = it },
                     label = { Text("Alamat Email Lengkap") },
-                    placeholder = { Text("contoh@gmail.com") },
+                    placeholder = { Text("contoh@domain.com") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -461,7 +461,7 @@ fun AddSingleAccountDialog(
                         passwordInput = it
                         testSuccess = null
                     },
-                    label = { Text("Password / App Password") },
+                    label = { Text("Kata Sandi Email (Sandi Asli)") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
@@ -549,7 +549,7 @@ fun AddSingleAccountDialog(
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
                             Text("Gagal: ${testErrorMessage ?: "Periksa password / email"}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                            Text("Pastikan menggunakan Sandi Aplikasi (bukan sandi biasa).", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelSmall)
+                            Text("Periksa kembali email dan kata sandi Anda. Anda juga dapat langsung menyimpan akun atau membukanya via tab Webmail.", color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -661,7 +661,7 @@ fun BulkImportCsvDialog(
             Column(modifier = Modifier.padding(20.dp)) {
                 Text("Bulk Account Import (CSV)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Format tiap baris: email,password (atau email,password,imap_host,imap_port,smtp_host,smtp_port)",
+                    "Format tiap baris: email,password_asli (atau email,password_asli,imap_host,imap_port,smtp_host,smtp_port)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -673,7 +673,7 @@ fun BulkImportCsvDialog(
                     onValueChange = { csvText = it },
                     label = { Text("Tempel Data CSV Akun di Sini") },
                     placeholder = {
-                        Text("user1@gmail.com,sandi_aplikasi_1\nuser2@outlook.com,sandi_2\nuser3@domain.com,sandi_3,mail.domain.com,993,mail.domain.com,465")
+                        Text("user1@domain.com,password_asli_1\nuser2@perusahaan.com,password_asli_2\nuser3@gmail.com,password_asli_3")
                     },
                     modifier = Modifier
                         .fillMaxWidth()

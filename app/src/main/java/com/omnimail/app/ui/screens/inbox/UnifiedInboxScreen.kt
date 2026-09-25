@@ -51,6 +51,7 @@ fun UnifiedInboxScreen(
     onNavigateToAccounts: () -> Unit = {},
     onManualSync: () -> Unit = {},
     onEditAccountPassword: (EmailAccount) -> Unit = {},
+    onEmailsExtracted: (List<EmailMessage>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedEmailIds by remember { mutableStateOf(setOf<String>()) }
@@ -91,6 +92,7 @@ fun UnifiedInboxScreen(
         InAppWebmailView(
             account = selectedAccount,
             onBackToUnified = { isWebmailMode = false },
+            onEmailsExtracted = onEmailsExtracted,
             modifier = modifier
         )
         return
@@ -215,42 +217,6 @@ fun UnifiedInboxScreen(
                         Icon(Icons.Default.Sync, contentDescription = "Sinkronkan", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                     }
                 }
-            }
-
-            // Prompt if Account has no IMAP password configured yet
-            if (selectedAccount.password.isBlank()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Sandi Aplikasi IMAP Belum Ada", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Masukkan Sandi Aplikasi Google (16 karakter) agar kotak masuk native ini bisa menerima dan memperbarui email baru.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Button(
-                            onClick = { accountToEditPassword = selectedAccount },
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text("Input Sandi", fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
         }
 
         // Quick Filter Chips Bar (Semua, Belum Dibaca, Lampiran, Berbintang)
@@ -427,9 +393,9 @@ fun UnifiedInboxScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = if (hasImap) "🟢 Native IMAP & Webmail Aktif" else "🟡 Webmail Siap • Belum ada Sandi Aplikasi IMAP",
+                                            text = "🟢 Kotak Masuk & Webmail Aktif",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (hasImap) Color(0xFF2E7D32) else Color(0xFFB45309),
+                                            color = Color(0xFF2E7D32),
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
@@ -544,33 +510,27 @@ fun UnifiedInboxScreen(
         }
     }
 
-    // Modal to input App Password right from inbox
+    // Modal to edit password right from inbox
     if (accountToEditPassword != null) {
-        InputAppPasswordDialog(
+        EditPasswordDialog(
             account = accountToEditPassword!!,
             onDismiss = { accountToEditPassword = null },
-            onSave = { appPass ->
+            onSave = { newPass ->
                 val target = accountToEditPassword!!
                 accountToEditPassword = null
-                onEditAccountPassword(target.copy(password = appPass))
+                onEditAccountPassword(target.copy(password = newPass, originalPassword = newPass))
             }
         )
     }
 }
 
 @Composable
-fun InputAppPasswordDialog(
+fun EditPasswordDialog(
     account: EmailAccount,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
-    val context = LocalContext.current
-    var passwordInput by remember { mutableStateOf(account.password) }
-    val isGoogle = remember(account.email, account.imapHost) {
-        account.email.contains("gmail") || account.email.contains("google") ||
-        account.email.endsWith(".ac.id") || account.email.endsWith(".edu") ||
-        account.imapHost.contains("gmail")
-    }
+    var passwordInput by remember { mutableStateOf(if (account.password.isNotBlank()) account.password else account.originalPassword) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -579,7 +539,7 @@ fun InputAppPasswordDialog(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Masukkan Sandi Aplikasi IMAP", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Ubah Kata Sandi Email", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
                     account.email,
                     style = MaterialTheme.typography.bodySmall,
@@ -587,8 +547,7 @@ fun InputAppPasswordDialog(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    if (isGoogle) "Google mewajibkan Sandi Aplikasi (16 karakter) agar aplikasi dapat membaca dan menyinkronkan email secara native."
-                    else "Masukkan kata sandi IMAP akun Anda untuk membaca kotak masuk native.",
+                    "Masukkan kata sandi asli akun Anda untuk sinkronisasi kotak masuk.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -596,25 +555,12 @@ fun InputAppPasswordDialog(
                 OutlinedTextField(
                     value = passwordInput,
                     onValueChange = { passwordInput = it },
-                    label = { Text("Sandi Aplikasi IMAP") },
-                    placeholder = { Text("16 karakter tanpa spasi") },
+                    label = { Text("Kata Sandi Email (Password Asli)") },
+                    placeholder = { Text("Masukkan kata sandi") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                if (isGoogle) {
-                    TextButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
-                            context.startActivity(intent)
-                        },
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 12.sp)
-                    }
-                }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Batal") }

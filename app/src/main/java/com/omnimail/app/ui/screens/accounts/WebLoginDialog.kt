@@ -71,15 +71,13 @@ fun WebLoginDialog(
     var customUrlInput by remember { mutableStateOf("https://webmail.") }
 
     var emailInput by remember { mutableStateOf("") }
-    var originalPasswordInput by remember { mutableStateOf("") }
-    var appPasswordInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
 
     var isLoading by remember { mutableStateOf(false) }
     var isAttaching by remember { mutableStateOf(false) }
     var isLoginDetected by remember { mutableStateOf(false) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var attachMessage by remember { mutableStateOf<String?>(null) }
-    var showAppPasswordInfo by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = { if (!isAttaching) onDismiss() },
@@ -161,68 +159,27 @@ fun WebLoginDialog(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        // Combined password inputs: Sandi Asli (Webmail) & Sandi Aplikasi (IMAP Native Sync)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = originalPasswordInput,
-                                onValueChange = { originalPasswordInput = it },
-                                label = { Text("Sandi Asli (Webmail)") },
-                                placeholder = { Text("Opsional") },
-                                singleLine = true,
-                                enabled = !isAttaching,
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            OutlinedTextField(
-                                value = appPasswordInput,
-                                onValueChange = { appPasswordInput = it },
-                                label = { Text("Sandi Aplikasi (IMAP)") },
-                                placeholder = { Text("16 Karakter") },
-                                singleLine = true,
-                                enabled = !isAttaching,
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        // Helpful guidance for App Password
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "💡 Sandi Aplikasi digunakan agar Kotak Masuk Native bisa baca email baru.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
-                                    context.startActivity(intent)
-                                },
-                                contentPadding = PaddingValues(horizontal = 6.dp)
-                            ) {
-                                Text("Buat Sandi", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        // Kata Sandi Email (Password Asli)
+                        OutlinedTextField(
+                            value = passwordInput,
+                            onValueChange = { passwordInput = it },
+                            label = { Text("Kata Sandi Email (Password Asli)") },
+                            placeholder = { Text("Opsional - untuk sinkronisasi otomatis") },
+                            singleLine = true,
+                            enabled = !isAttaching,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
                         Button(
                             onClick = {
                                 val finalEmail = emailInput.trim()
-                                val finalOriginal = originalPasswordInput.trim()
-                                val finalAppPass = appPasswordInput.trim()
+                                val finalPassword = passwordInput.trim()
 
                                 if (finalEmail.isNotBlank()) {
                                     coroutineScope.launch {
                                         isAttaching = true
-                                        attachMessage = "Menyimpan akun..."
+                                        attachMessage = "Menyimpan akun & mengambil email kotak masuk..."
                                         val cookies = CookieManager.getInstance().getCookie(currentUrl) ?: ""
                                         val serverConfig = EmailService.autoDetectServer(finalEmail)
                                         
@@ -242,8 +199,8 @@ fun WebLoginDialog(
                                             authType = AuthType.WEB_SESSION,
                                             colorHex = selectedProvider.defaultColor,
                                             status = AccountStatus.ONLINE,
-                                            password = finalAppPass,
-                                            originalPassword = finalOriginal,
+                                            password = finalPassword,
+                                            originalPassword = finalPassword,
                                             imapHost = serverConfig.imapHost,
                                             imapPort = serverConfig.imapPort,
                                             smtpHost = serverConfig.smtpHost,
@@ -253,9 +210,23 @@ fun WebLoginDialog(
                                             webCookies = cookies
                                         )
 
+                                        // Extract emails from active WebView DOM and authenticated web session
                                         var fetchedEmails = emptyList<EmailMessage>()
-                                        if (finalAppPass.isNotBlank()) {
-                                            attachMessage = "Menghubungkan IMAP & menarik email baru..."
+                                        if (webViewInstance != null) {
+                                            val domEmails = WebMailExtractor.extractFromWebView(webViewInstance!!, newAccount)
+                                            if (domEmails.isNotEmpty()) {
+                                                fetchedEmails = domEmails
+                                            }
+                                        }
+
+                                        if (fetchedEmails.isEmpty()) {
+                                            val feedEmails = WebMailExtractor.fetchSessionFeed(newAccount)
+                                            if (feedEmails.isNotEmpty()) {
+                                                fetchedEmails = feedEmails
+                                            }
+                                        }
+
+                                        if (fetchedEmails.isEmpty() && finalPassword.isNotBlank()) {
                                             val fetchRes = EmailService.loginAndFetchInbox(newAccount, limit = 30)
                                             if (fetchRes.isSuccess) {
                                                 fetchedEmails = fetchRes.getOrDefault(Pair(newAccount, emptyList())).second

@@ -90,10 +90,6 @@ fun OmniMailApp() {
                     var errorCount = 0
 
                     for ((idx, acc) in accounts.withIndex()) {
-                        if (acc.password.isBlank()) {
-                            // Account is in Webmail mode only, skip IMAP
-                            continue
-                        }
                         val res = EmailService.fetchInboxEmails(acc, limit = 30)
                         if (res.isSuccess) {
                             val fetched = res.getOrDefault(emptyList())
@@ -389,6 +385,17 @@ fun OmniMailApp() {
                                                 snackbarHostState.showSnackbar("Sandi akun ${updatedAcc.email} diperbarui! Menyinkronkan...")
                                                 syncAllAccounts()
                                             }
+                                        },
+                                        onEmailsExtracted = { extractedList ->
+                                            if (extractedList.isNotEmpty()) {
+                                                val existingIds = emails.map { it.id }.toSet()
+                                                val newItems = extractedList.filter { it.id !in existingIds }
+                                                if (newItems.isNotEmpty()) {
+                                                    val merged = (newItems + emails).sortedByDescending { it.timestamp }
+                                                    emails = merged
+                                                    OmniStorage.saveEmails(context, merged)
+                                                }
+                                            }
                                         }
                                     )
                                 }
@@ -444,17 +451,15 @@ fun OmniMailApp() {
                                             accounts = updated
                                             OmniStorage.saveAccounts(context, updated)
                                         },
-                                        onUpdateAccountPasswords = { accId, appPass, origPass ->
+                                        onUpdateAccountPassword = { accId, newPass ->
                                             val updated = accounts.map {
-                                                if (it.id == accId) it.copy(password = appPass, originalPassword = origPass) else it
+                                                if (it.id == accId) it.copy(password = newPass, originalPassword = newPass) else it
                                             }
                                             accounts = updated
                                             OmniStorage.saveAccounts(context, updated)
                                             coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Sandi akun berhasil diperbarui!")
-                                                if (appPass.isNotBlank()) {
-                                                    syncAllAccounts()
-                                                }
+                                                snackbarHostState.showSnackbar("Sandi akun berhasil diperbarui! Menyinkronkan...")
+                                                syncAllAccounts()
                                             }
                                         },
                                         onDeleteAccount = { accId ->

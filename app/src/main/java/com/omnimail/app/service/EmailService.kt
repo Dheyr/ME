@@ -31,14 +31,6 @@ object EmailService {
                 smtpPort = 465,
                 useSsl = true
             )
-            // Academic and university domains in Indonesia (e.g. uniba-bpn.ac.id) use Google Workspace
-            domain.contains("uniba") || domain.endsWith(".ac.id") || domain.endsWith(".edu") || domain.endsWith(".sch.id") -> ServerConfig(
-                imapHost = "imap.gmail.com",
-                imapPort = 993,
-                smtpHost = "smtp.gmail.com",
-                smtpPort = 465,
-                useSsl = true
-            )
             domain.contains("outlook") || domain.contains("hotmail") || domain.contains("live.com") || domain.contains("office365") -> ServerConfig(
                 imapHost = "outlook.office365.com",
                 imapPort = 993,
@@ -149,15 +141,13 @@ object EmailService {
 
     private fun connectToStore(account: EmailAccount): Pair<Store, EmailAccount> {
         val domain = account.email.substringAfter("@", "").lowercase().trim()
-        val isGmail = domain.contains("gmail") || domain.contains("google") || domain.contains("uniba") ||
-                domain.endsWith(".ac.id") || domain.endsWith(".edu") || account.imapHost.contains("gmail")
+        val isGmail = domain == "gmail.com" || domain == "googlemail.com" || account.imapHost == "imap.gmail.com"
         val isWellKnownSsl = isGmail || domain.contains("yahoo") || account.imapHost.contains("yahoo") ||
                 domain.contains("outlook") || account.imapHost.contains("outlook") || account.imapHost.contains("office365")
 
-        // Auto-clean password: strip internal spaces if user pasted 'abcd efgh ijkl mnop' Google App Password
-        val cleanPassword = if (isGmail) account.password.replace(" ", "").trim() else account.password.trim()
+        val cleanPassword = if (account.password.isNotBlank()) account.password.trim() else account.originalPassword.trim()
         if (cleanPassword.isBlank()) {
-            throw Exception("Sandi Aplikasi IMAP belum diatur untuk akun ${account.email}. Masukkan Sandi Aplikasi agar kotak masuk native dapat diperbarui.")
+            throw Exception("Kata sandi belum diatur untuk akun ${account.email}.")
         }
 
         val hostsToTry = if (account.imapHost.startsWith("mail.") && domain.isNotBlank()) {
@@ -193,11 +183,7 @@ object EmailService {
                         return Pair(store, acc.copy(imapPort = port, useSsl = ssl))
                     }
                 } catch (authEx: AuthenticationFailedException) {
-                    val helpfulMsg = if (isGmail) {
-                        "Kredensial ditolak oleh Google. Google mewajibkan Sandi Aplikasi (App Password 16 karakter) untuk login IMAP. Silakan buat sandi di myaccount.google.com/apppasswords lalu gunakan di sini."
-                    } else {
-                        "Kredensial ditolak oleh server ${host}. Periksa kembali email dan kata sandi Anda."
-                    }
+                    val helpfulMsg = "Kredensial ditolak oleh server ${host}. Periksa kembali email dan kata sandi Anda."
                     throw Exception(helpfulMsg)
                 } catch (e: Exception) {
                     lastError = e
@@ -206,11 +192,7 @@ object EmailService {
                         msg.contains("Invalid credentials", ignoreCase = true) ||
                         msg.contains("Application-specific password", ignoreCase = true)
                     ) {
-                        val helpfulMsg = if (isGmail) {
-                            "Kredensial ditolak oleh Google. Google mewajibkan Sandi Aplikasi (App Password 16 karakter) untuk login IMAP. Silakan buat sandi di myaccount.google.com/apppasswords lalu gunakan di sini."
-                        } else {
-                            "Autentikasi gagal: Kata sandi atau email tidak valid pada server ${host}."
-                        }
+                        val helpfulMsg = "Autentikasi gagal: Kata sandi atau email tidak valid pada server ${host}."
                         throw Exception(helpfulMsg)
                     }
                 }
@@ -242,6 +224,12 @@ object EmailService {
         account: EmailAccount,
         limit: Int = 30
     ): Result<Pair<EmailAccount, List<EmailMessage>>> = withContext(Dispatchers.IO) {
+        val cleanPassword = if (account.password.isNotBlank()) account.password.trim() else account.originalPassword.trim()
+        if (cleanPassword.isBlank() && account.authType == AuthType.WEB_SESSION) {
+            val sessionEmails = WebMailExtractor.fetchSessionFeed(account)
+            return@withContext Result.success(Pair(account, sessionEmails))
+        }
+
         var store: Store? = null
         var folder: Folder? = null
         try {
@@ -342,11 +330,43 @@ object EmailService {
     }
 
     suspend fun fetchInboxEmails(account: EmailAccount, limit: Int = 30): Result<List<EmailMessage>> = withContext(Dispatchers.IO) {
-        val res = loginAndFetchInbox(account, limit)
-        if (res.isSuccess) {
-            Result.success(res.getOrThrow().second)
+        val domain = account.email.substringAfter("@", "").lowercase().trim()
+        val isGoogle = domain == "gmail.com" || domain == "googlemail.com" || account.imapHost == "imap.gmail.com"
+
+        // For Web Session accounts or Google accounts, first check session feed
+        if (account.authType == AuthType.WEB_SESSION || isGoogle) {
+            val sessionEmails = WebMailExtractor.fetchSessionFeed(account)
+            if (sessionEmails.isNotEmpty()) {
+                return@withContext Result.success(sessionEmails)
+            }
+        }
+
+        // Try standard IMAP with real password
+        val cleanPassword = if (account.password.isNotBlank()) account.password.trim() else account.originalPassword.trim()
+        if (cleanPassword.isNotBlank()) {
+            try {
+                val res = loginAndFetchInbox(account.copy(password = cleanPassword), limit)
+                if (res.isSuccess) {
+                    return@withContext Result.success(res.getOrThrow().second)
+                }
+            } catch (e: Exception) {
+                // If IMAP fails and it's a Google/Web account, retry session feed
+                if (isGoogle || account.authType == AuthType.WEB_SESSION) {
+                    val sessionEmails = WebMailExtractor.fetchSessionFeed(account)
+                    if (sessionEmails.isNotEmpty()) {
+                        return@withContext Result.success(sessionEmails)
+                    }
+                }
+                return@withContext Result.failure(e)
+            }
+        }
+
+        // Fallback to session feed
+        val sessionEmails = WebMailExtractor.fetchSessionFeed(account)
+        if (sessionEmails.isNotEmpty()) {
+            Result.success(sessionEmails)
         } else {
-            Result.failure(res.exceptionOrNull() ?: Exception("Gagal mengambil email"))
+            Result.failure(Exception("Buka tab Webmail untuk menyinkronkan email akun ${account.email}."))
         }
     }
 
@@ -362,7 +382,7 @@ object EmailService {
         )
 
         val isGmail = fromAccount.email.contains("gmail") || fromAccount.email.contains("google") || fromAccount.smtpHost.contains("gmail")
-        val cleanPassword = if (isGmail) fromAccount.password.replace(" ", "").trim() else fromAccount.password.trim()
+        val cleanPassword = if (fromAccount.password.isNotBlank()) fromAccount.password.trim() else fromAccount.originalPassword.trim()
 
         var lastError: Exception? = null
 

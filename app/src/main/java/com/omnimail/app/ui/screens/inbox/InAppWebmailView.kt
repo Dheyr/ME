@@ -32,6 +32,7 @@ import com.omnimail.app.model.EmailAccount
 fun InAppWebmailView(
     account: EmailAccount,
     onBackToUnified: () -> Unit,
+    onEmailsExtracted: (List<com.omnimail.app.model.EmailMessage>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
@@ -279,6 +280,16 @@ fun InAppWebmailView(
                             if (url != null && (url.contains("myaccount.google.com") || url.contains("accounts.google.com/ServiceLogin"))) {
                                 if (url.contains("myaccount.google.com")) {
                                     view?.loadUrl("https://mail.google.com/mail/u/?authuser=${account.email}")
+                                }
+                            }
+
+                            // Extract inbox messages from rendered webmail and sync to native inbox
+                            if (url != null && (url.contains("mail.google.com") || url.contains("webmail"))) {
+                                view?.evaluateJavascript(com.omnimail.app.service.WebMailExtractor.EXTRACTION_JS) { json ->
+                                    val extracted = com.omnimail.app.service.WebMailExtractor.parseExtractedJson(json ?: "", account)
+                                    if (extracted.isNotEmpty()) {
+                                        onEmailsExtracted(extracted)
+                                    }
                                 }
                             }
                         }

@@ -37,7 +37,7 @@ fun AccountManagementScreen(
     onAddSingleAccount: (EmailAccount, List<EmailMessage>) -> Unit,
     onUpdateAccountProxy: (accountId: String, ProxyConfig?) -> Unit,
     onDeleteAccount: (accountId: String) -> Unit = {},
-    onUpdateAccountPasswords: (accountId: String, appPassword: String, originalPassword: String) -> Unit = { _, _, _ -> },
+    onUpdateAccountPassword: (accountId: String, newPassword: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var showMethodPicker by remember { mutableStateOf(false) }
@@ -53,7 +53,7 @@ fun AccountManagementScreen(
                 title = {
                     Column {
                         Text("Kelola Akun Email (${accounts.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("Sandi asli & sandi aplikasi digabung dalam satu akun", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Kelola akun email dan sinkronisasi kotak masuk", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 actions = {
@@ -191,13 +191,13 @@ fun AccountManagementScreen(
         )
     }
 
-    // Edit Passwords Dialog (Unified Sandi Asli & Sandi Aplikasi)
+    // Edit Password Dialog
     selectedAccountForPasswords?.let { account ->
-        EditAccountPasswordsDialog(
+        EditAccountPasswordDialog(
             account = account,
             onDismiss = { selectedAccountForPasswords = null },
-            onSave = { appPass, origPass ->
-                onUpdateAccountPasswords(account.id, appPass, origPass)
+            onSave = { newPass ->
+                onUpdateAccountPassword(account.id, newPass)
                 selectedAccountForPasswords = null
             }
         )
@@ -292,13 +292,13 @@ fun AccountCard(
                         AssistChip(
                             onClick = onEditPasswords,
                             leadingIcon = {
-                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFFB45309))
+                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                             },
                             label = {
                                 Text(
-                                    "+ Sandi Aplikasi IMAP",
+                                    if (account.password.isNotBlank() || account.originalPassword.isNotBlank()) "Sandi Tersimpan" else "+ Atur Sandi",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFFB45309),
+                                    color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -356,19 +356,12 @@ fun AccountCard(
 }
 
 @Composable
-fun EditAccountPasswordsDialog(
+fun EditAccountPasswordDialog(
     account: EmailAccount,
     onDismiss: () -> Unit,
-    onSave: (appPassword: String, originalPassword: String) -> Unit
+    onSave: (newPassword: String) -> Unit
 ) {
-    val context = LocalContext.current
-    var appPassword by remember { mutableStateOf(account.password) }
-    var originalPassword by remember { mutableStateOf(account.originalPassword) }
-    val isGoogle = remember(account.email, account.imapHost) {
-        account.email.contains("gmail") || account.email.contains("google") ||
-        account.email.endsWith(".ac.id") || account.email.endsWith(".edu") ||
-        account.imapHost.contains("gmail")
-    }
+    var password by remember { mutableStateOf(if (account.password.isNotBlank()) account.password else account.originalPassword) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -386,44 +379,16 @@ fun EditAccountPasswordsDialog(
                 )
 
                 Text(
-                    "Sandi Asli (Webmail) dan Sandi Aplikasi (IMAP Native) digabung dalam akun ini.",
+                    "Masukkan kata sandi asli akun Anda untuk sinkronisasi kotak masuk native dan webmail.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 OutlinedTextField(
-                    value = appPassword,
-                    onValueChange = { appPassword = it },
-                    label = { Text(if (isGoogle) "Sandi Aplikasi IMAP (16 Karakter)" else "Kata Sandi Email (IMAP)") },
-                    placeholder = { Text("Untuk sync inbox & kirim email native") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (isGoogle) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
-                                context.startActivity(intent)
-                            },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 11.sp)
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = originalPassword,
-                    onValueChange = { originalPassword = it },
-                    label = { Text("Sandi Asli (Webmail & 2FA)") },
-                    placeholder = { Text("Opsional") },
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Kata Sandi Email (Password Asli)") },
+                    placeholder = { Text("Masukkan kata sandi email") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
@@ -435,7 +400,7 @@ fun EditAccountPasswordsDialog(
                 ) {
                     TextButton(onClick = onDismiss) { Text("Batal") }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { onSave(appPassword.trim(), originalPassword.trim()) }) {
+                    Button(onClick = { onSave(password.trim()) }) {
                         Text("Simpan Sandi")
                     }
                 }
@@ -455,7 +420,6 @@ fun AddSingleAccountDialog(
 
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
-    var originalPasswordInput by remember { mutableStateOf("") }
 
     var imapHost by remember { mutableStateOf("") }
     var imapPort by remember { mutableStateOf("993") }
@@ -491,8 +455,6 @@ fun AddSingleAccountDialog(
     val isGoogleDomain = remember(emailInput, imapHost) {
         emailInput.contains("gmail", ignoreCase = true) ||
         emailInput.contains("google", ignoreCase = true) ||
-        emailInput.contains("uniba", ignoreCase = true) ||
-        emailInput.endsWith(".ac.id", ignoreCase = true) ||
         imapHost.contains("gmail", ignoreCase = true)
     }
 
@@ -511,7 +473,7 @@ fun AddSingleAccountDialog(
             ) {
                 Text("Tambah Akun Email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Sandi Asli & Sandi Aplikasi kini digabung dalam satu akun",
+                    "Masukkan email dan kata sandi akun Anda",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -548,10 +510,7 @@ fun AddSingleAccountDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            if (isGoogleDomain)
-                                "Akun Google: Masukkan Sandi Aplikasi (16 karakter) agar inbox native bisa memperbarui email. Masukkan juga Sandi Asli jika ingin membuka webmail."
-                            else
-                                "Masukkan email dan kata sandi akun Anda. Kotak masuk native dan webmail akan terhubung secara otomatis.",
+                            "Masukkan email dan kata sandi asli akun Anda. Kotak masuk native dan webmail akan terhubung secara otomatis.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -575,44 +534,13 @@ fun AddSingleAccountDialog(
                 OutlinedTextField(
                     value = passwordInput,
                     onValueChange = { passwordInput = it; loginErrorMessage = null },
-                    label = { Text(if (isGoogleDomain) "Sandi Aplikasi IMAP (16 Karakter)" else "Kata Sandi Email") },
-                    placeholder = { Text(if (isGoogleDomain) "16 karakter dari Google" else "Kata sandi email") },
-                    singleLine = true,
-                    enabled = !isLoggingIn,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = originalPasswordInput,
-                    onValueChange = { originalPasswordInput = it },
-                    label = { Text("Sandi Asli (Webmail & 2FA - Opsional)") },
-                    placeholder = { Text("Untuk login webmail") },
+                    label = { Text("Kata Sandi Email (Password Asli)") },
+                    placeholder = { Text("Masukkan kata sandi asli") },
                     singleLine = true,
                     enabled = !isLoggingIn,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                if (isGoogleDomain) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))
-                                context.startActivity(intent)
-                            },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Buka Pembuat Sandi Aplikasi Google", fontSize = 11.sp)
-                        }
-                    }
-                }
 
                 // Toggle advanced settings
                 Row(
@@ -728,7 +656,7 @@ fun AddSingleAccountDialog(
                                     authType = AuthType.IMAP_SMTP_MANUAL,
                                     colorHex = 0xFF3B82F6,
                                     password = passwordInput.trim(),
-                                    originalPassword = originalPasswordInput.trim(),
+                                    originalPassword = passwordInput.trim(),
                                     imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
                                     imapPort = imapPort.toIntOrNull() ?: 993,
                                     smtpHost = smtpHost.ifBlank { "smtp.${emailInput.substringAfter("@")}" },
@@ -762,7 +690,7 @@ fun AddSingleAccountDialog(
                                         authType = AuthType.IMAP_SMTP_MANUAL,
                                         colorHex = 0xFF3B82F6,
                                         password = passwordInput.trim(),
-                                        originalPassword = originalPasswordInput.trim(),
+                                        originalPassword = passwordInput.trim(),
                                         imapHost = imapHost.ifBlank { "imap.${emailInput.substringAfter("@")}" },
                                         imapPort = imapPort.toIntOrNull() ?: 993,
                                         smtpHost = smtpHost.ifBlank { "smtp.${emailInput.substringAfter("@")}" },
@@ -937,7 +865,7 @@ fun MethodPickerDialog(
             Column {
                 Text("Pilih Cara Hubungkan Email", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "Sandi Asli & Sandi Aplikasi tersimpan bersama dalam satu akun",
+                    "Kelola email Anda dalam satu aplikasi terpadu",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1030,7 +958,7 @@ fun MethodPickerDialog(
                             Text("Login Manual IMAP / SMTP", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                "Koneksi protokol IMAP native dengan Sandi Aplikasi & Sandi Asli tergabung.",
+                                "Koneksi protokol email langsung menggunakan kata sandi Anda.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp

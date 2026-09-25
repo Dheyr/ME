@@ -208,7 +208,6 @@ fun UnifiedInboxScreen(
                         EmailFolder.STARRED -> "Belum Ada Email Berbintang" to "Tandai email dengan bintang untuk menyimpannya di sini."
                         EmailFolder.TRASH -> "Kotak Sampah Kosong" to "Tidak ada email di kotak sampah."
                         EmailFolder.SPAM -> "Tidak Ada Spam" to "Kotak spam bersih."
-                        EmailFolder.ARCHIVE -> "Arsip Kosong" to "Tidak ada email di arsip."
                     }
 
                     Column(

@@ -217,6 +217,7 @@ fun UnifiedInboxScreen(
                         Icon(Icons.Default.Sync, contentDescription = "Sinkronkan", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                     }
                 }
+            }
         }
 
         // Quick Filter Chips Bar (Semua, Belum Dibaca, Lampiran, Berbintang)

@@ -28,6 +28,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.omnimail.app.model.*
 import com.omnimail.app.service.EmailService
+import com.omnimail.app.service.WebMailExtractor
 import kotlinx.coroutines.launch
 
 enum class WebProvider(val title: String, val loginUrl: String, val successKeywords: List<String>, val defaultColor: Long) {
